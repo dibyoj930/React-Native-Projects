@@ -30,5 +30,21 @@ target 'MyApp' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    # Several third-party podspecs still declare iOS 10-13, below what
+    # RN 0.85 supports, so Xcode warns on every build:
+    #   "The iOS Simulator deployment target 'IPHONEOS_DEPLOYMENT_TARGET'
+    #    is set to 13.0, but the range of supported deployment target
+    #    versions is 15.0 to 27.0.x."
+    # Floor every pod at the minimum RN supports. Higher targets are left
+    # untouched so a pod that legitimately needs more is not downgraded.
+    installer.pods_project.targets.each do |target|
+      target.build_configurations.each do |config|
+        current = config.build_settings['IPHONEOS_DEPLOYMENT_TARGET']
+        if current.nil? || Gem::Version.new(current) < Gem::Version.new('15.0')
+          config.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] = '15.0'
+        end
+      end
+    end
   end
 end

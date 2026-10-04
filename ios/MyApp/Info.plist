@@ -34,11 +34,28 @@
 		<true/>
 	</dict>
 	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
+	<string/>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
+	<key>UIApplicationSceneManifest</key>
+	<dict>
+		<key>UIApplicationSupportsMultipleScenes</key>
+		<false/>
+		<key>UISceneConfigurations</key>
+		<dict>
+			<key>UIWindowSceneSessionRoleApplication</key>
+			<array>
+				<dict>
+					<key>UISceneConfigurationName</key>
+					<string>Default Configuration</string>
+					<key>UISceneDelegateClassName</key>
+					<string>$(PRODUCT_MODULE_NAME).AppDelegate</string>
+				</dict>
+			</array>
+		</dict>
+	</dict>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>arm64</string>
@@ -56,5 +73,9 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<false/>
+	<key>UIAppFonts</key>
+	<array>
+		<string>MaterialDesignIcons.ttf</string>
+	</array>
 </dict>
 </plist>
