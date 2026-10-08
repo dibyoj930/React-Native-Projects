@@ -13,14 +13,14 @@ import { TimerPickerModal } from 'react-native-timer-picker';
 import {
   cancelTimerNotification,
   ensurePermission,
-  syncTimerNotification,
 } from './notifications';
 import { TodoRow } from './components/TodoRow';
 import { AllTasksScreen } from './components/AllTasksScreen';
 import { AddTodoModal, type TodoDraft } from './components/AddTodoModal';
 import { ProductivityDashboard } from './components/ProductivityDashboard';
 import { TodayCard } from './components/TodayCard';
-import { useFocusTimer, type TimerState } from './hooks/useFocusTimer';
+import type { TimerState } from './hooks/useFocusTimer';
+import { useTimerOrchestration } from './hooks/useTimerOrchestration';
 import { useProductivity, formatDueLabel, todayKey } from './productivity';
 import { type Todo } from './todos/model';
 import { useTasks } from './todos/useTasks';
@@ -119,8 +119,6 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
   // itself — the old inline rename kept `editIndex` *and* `editText` here, a
   // second copy of what was already typed, and could only carry a title.
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [pickerTargetId, setPickerTargetId] = useState<string | null>(null);
-  const [pickerVisible, setPickerVisible] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState<string | null>(null);
   // The task sheet: creating and editing both. A boolean rather than a navigation
   // library — there is no router in this app, and one sheet is not a reason to
@@ -181,15 +179,36 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
     [completeTodos, finishFocus],
   );
 
+  /**
+   * The timer, its picker and the row controls around them.
+   *
+   * The engine (`useFocusTimer`) keeps ticking inside the hook; what this
+   * component supplies is the *other* side of every timer event — what a start,
+   * a pause, a stop and an expiry each mean for the task and the session log.
+   * Those five are the cross-domain rules and they stay here, where both the
+   * productivity layer and the task list are in reach.
+   */
   const {
     hasTimer,
     isRunning,
-    start: startTimer,
-    pause: pauseTimer,
-    resume: resumeTimer,
     clearTimer,
-    remainingSecondsFor,
-  } = useFocusTimer({ onExpire: handleTimerExpired });
+    pickerVisible,
+    setPickerVisible,
+    openTimerPicker,
+    handleTimerConfirm,
+    handleTimerCancel,
+    stopTimer,
+    toggleTimerRunning,
+    formatTimeForTodo,
+  } = useTimerOrchestration({
+    onTimerExpired: handleTimerExpired,
+    onStartFocus: startFocus,
+    onPauseFocus: pauseFocus,
+    onResumeFocus: resumeFocus,
+    // A deliberate stop and a natural expiry are both "the session is over";
+    // only the *status* differs, which is the argument the hook passes through.
+    onStopFocus: finishFocus,
+  });
 
   /**
    * Whether the completion checkbox is inert, for two different reasons:
@@ -317,60 +336,6 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
     // completion stays correctable. Only a timer running out locks.
     finishFocus(id, nowCompleted ? 'finished' : 'stopped');
     noteActivity();
-  };
-
-  const openTimerPicker = (id: string) => {
-    setPickerTargetId(id);
-    setPickerVisible(true);
-  };
-
-  const handleTimerConfirm = (picked: TimerState) => {
-    if (pickerTargetId) {
-      const endPicker = startTimer(pickerTargetId, picked);
-      if (endPicker !== null) {
-        startFocus(pickerTargetId);
-        syncTimerNotification({ timerId: pickerTargetId, title: 'Timer done', body: 'Time is up', fireAt: endPicker });
-      }
-    }
-    setPickerVisible(false);
-    setPickerTargetId(null);
-  };
-
-  const handleTimerCancel = () => {
-    setPickerVisible(false);
-    setPickerTargetId(null);
-  };
-
-  const stopTimer = (id: string) => {
-    cancelTimerNotification(id);
-    clearTimer(id);
-    // Deliberate early stop — the focus was real, the completion was not.
-    finishFocus(id, 'stopped');
-  };
-
-  const toggleTimerRunning = (id: string) => {
-    if (isRunning(id)) {
-      pauseTimer(id);
-      // Banks the elapsed segment. Without this the time focused before a pause
-      // would be unrecoverable, which was the original data-loss bug.
-      pauseFocus(id);
-      cancelTimerNotification(id);
-      return;
-    }
-    const end = resumeTimer(id);
-    if (end !== null) {
-      resumeFocus(id);
-      syncTimerNotification({ timerId: id, title: 'Timer done', body: 'Time is up', fireAt: end });
-    }
-  };
-
-  const formatTimeForTodo = (id: string): string => {
-    const total = remainingSecondsFor(id);
-    const pad = (n: number) => n.toString().padStart(2, '0');
-    const h = Math.floor(total / 3600);
-    const m = Math.floor((total % 3600) / 60);
-    const s = total % 60;
-    return `${pad(h)}:${pad(m)}:${pad(s)}`;
   };
 
   /**

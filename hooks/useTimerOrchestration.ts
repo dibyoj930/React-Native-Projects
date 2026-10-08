@@ -66,6 +66,12 @@ export function useTimerOrchestration(deps: TimerOrchestrationDeps) {
     setPickerTargetId(null);
   }, []);
 
+  /**
+   * Ends a task's timer early and closes the session.
+   *
+   * The caller decides the status it passes: a deliberate stop is `'stopped'` —
+   * the focus was real, the completion was not.
+   */
   const stopTimer = useCallback(
     (id: string) => {
       cancelTimerNotification(id);
@@ -75,6 +81,14 @@ export function useTimerOrchestration(deps: TimerOrchestrationDeps) {
     [clearTimer, onStopFocus],
   );
 
+  /**
+   * Pause/resume a running timer.
+   *
+   * The pause callback is not decoration: it banks the elapsed segment with the
+   * productivity layer. Without it the time focused before a pause would be
+   * unrecoverable, which was an original data-loss bug. Resume re-arms the
+   * "timer done" notification for the new end time.
+   */
   const toggleTimerRunning = useCallback(
     (id: string) => {
       if (isRunning(id)) {
@@ -121,6 +135,6 @@ export function useTimerOrchestration(deps: TimerOrchestrationDeps) {
     isRunning,
     remainingSecondsFor,
     formatTimeForTodo,
-    clearTimerForId: clearTimer,
+    clearTimer,
   };
 }
