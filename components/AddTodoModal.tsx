@@ -23,25 +23,15 @@ import {
   type DayKey,
 } from '../productivity';
 import { AVAILABLE_TAGS, accentFor, textOnAccent, tintOf } from '../todos/tags';
-import type { Todo } from '../todos/model';
+import type { Todo, TodoDraft } from '../todos/model';
 import { useTheme } from '../theme/useTheme';
 import type { Theme } from '../theme/theme';
 
-/** What the modal hands back. Deliberately not a `Todo`: the id is the caller's. */
-export type TodoDraft = {
-  text: string;
-  notes?: string;
-  dueDate?: DayKey;
-  /**
-   * The chosen tag, or absent for none.
-   *
-   * One tag or none — the `#` control offers the vocabulary and takes a single
-   * pick, which is the one-element contract `Todo.tags` already speaks. The sheet
-   * prefills it from the task being edited, or from the tag screen a new task is
-   * being born on.
-   */
-  tag?: string;
-};
+// The draft type belongs to the task model: the operations that apply it are
+// domain logic, and they must not import this component to name their input.
+// Re-exported because this module's public shape always included it, and the
+// sheet's tests import it from here.
+export type { TodoDraft } from '../todos/model';
 
 export type AddTodoModalProps = {
   visible: boolean;

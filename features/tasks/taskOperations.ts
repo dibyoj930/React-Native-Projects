@@ -1,8 +1,7 @@
 /**
  * Task mutation operations and rules (business logic extracted from UI).
  */
-import type { Todo } from '../../todos/model';
-import type { TodoDraft } from '../../components/AddTodoModal';
+import type { Todo, TodoDraft } from '../../todos/model';
 
 export type TaskContext = {
   now: () => number;

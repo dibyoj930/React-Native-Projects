@@ -55,6 +55,34 @@ export type Todo = {
 };
 
 /**
+ * What the add/edit sheet hands back. Deliberately not a `Todo`: the id is the
+ * caller's, and `id`/`createdAt`/`completed`/`completedAt` are facts about a
+ * task rather than form data, so a draft can never overwrite them.
+ *
+ * This lives in the model rather than in `AddTodoModal` because the operations
+ * that apply a draft are domain logic. When it sat in the component, the domain
+ * had to import the UI to name its own input type — the dependency ran the
+ * wrong way.
+ */
+export type TodoDraft = {
+  text: string;
+  notes?: string;
+  dueDate?: DayKey;
+  /**
+   * The chosen tag, or absent for none.
+   *
+   * One tag or none — the `#` control offers the vocabulary and takes a single
+   * pick, which is the one-element contract `Todo.tags` already speaks. The sheet
+   * prefills it from the task being edited, or from the tag screen a new task is
+   * being born on.
+   *
+   * `undefined` on an edit means "keep whatever the task already had"; a label
+   * means "replace it".
+   */
+  tag?: string;
+};
+
+/**
  * Repairs whatever is in storage into a valid `Todo[]`.
  *
  * On read rather than through a version bump, because the only persisted key has
