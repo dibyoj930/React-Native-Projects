@@ -1,6 +1,13 @@
 /**
- * Timer orchestration hook: wires useFocusTimer + productivity + notifications + todos updates.
- * Extracts orchestration logic out of WelcomeComponent while keeping useFocusTimer as engine.
+ * The timer, its picker and the row controls around them.
+ *
+ * `useFocusTimer` is the engine underneath and stays untouched: it owns the
+ * countdown, the expiry tick and the "running" definition. This hook owns the
+ * wiring around it — which task the picker is open for, which notification is
+ * armed for which end time, the format a row prints — and takes the five things
+ * it cannot know as callbacks: what a start, a pause, a resume, a stop and an
+ * expiry each mean for the task and the session log. Those belong to whoever
+ * holds both the timer and the productivity layer, which is the container.
  */
 import { useCallback, useState } from 'react';
 

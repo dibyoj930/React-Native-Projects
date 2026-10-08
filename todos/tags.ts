@@ -5,7 +5,19 @@
  * the task row renders tag chips and needed this logic, and duplicating the map
  * would create a second colour table that silently diverges from the first — the
  * exact failure the old `TAG_COLORS` / `getTagColor` lookup is still remembered
- * for in `WelcomeComponent.tsx`.
+ * for.
+ *
+ * Two older mistakes are worth keeping in view, because both are ways this
+ * vocabulary went wrong while looking correct:
+ *
+ *  - The chips once sat above the task list, styled like a filter, over an
+ *    unfiltered `data={todos}`. All they ever did was supply the default tag for
+ *    the next task. They now live where the choice applies: the add/edit sheet,
+ *    and the tag screen a task is created from.
+ *  - Every tag is listed here whether or not anything uses it. A tag with
+ *    nothing behind it opens an empty screen whose `+` creates its first task —
+ *    the only way a task can come to carry one. Pruning the vocabulary because
+ *    it looked unused would have made it impossible to add.
  *
  * Colours are raw hex rather than theme tokens because each tag is a distinct
  * hue, not a lightness of one colour, so there is no light/dark pair to derive.

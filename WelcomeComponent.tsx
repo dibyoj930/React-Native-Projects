@@ -22,12 +22,9 @@ import { triggerHaptic } from './haptics';
 import { useTheme } from './theme/useTheme';
 import type { Theme } from './theme/theme';
 
-// The task model moved to `todos/model.ts` so the shared row, the All Tasks
-// screen and the Add Todo modal can use it without importing a type out of this
-// component. Re-exported here because it was part of this module's public shape
-// and something outside may already import it from this path.
-export type { Todo } from './todos/model';
-export { migrateTodos } from './todos/model';
+// The task model, the tag vocabulary and the storage boundary all live under
+// `todos/`. Nothing is re-exported from here: the components that need them
+// import the domain directly, and this module's own surface is the screen.
 
 /**
  * Where the duration picker opens.
@@ -44,21 +41,6 @@ export { migrateTodos } from './todos/model';
  * the picker opens on this value instead of zero, which reads as "nothing chosen".
  */
 const DEFAULT_FOCUS_MINUTES = 25;
-
-// The tag vocabulary and its colour derivation now live in `todos/tags.ts`,
-// because the task row renders tag chips too and a second copy of this table is
-// precisely how the old `TAG_COLORS` / `getTagColor` lookup ended up diverging
-// from `AVAILABLE_TAGS` in the first place.
-//
-// NOTE: that old lookup table is now gone too. It was superseded by
-// `AVAILABLE_TAGS` + `TAG_ACCENTS` and had no callers, so it was removed rather
-// than left behind as a second, silently-diverging colour map.
-//
-// The chips themselves moved into the Add Todo sheet, where the choice applies to a
-// task. Here they looked like a filter — sitting above the list, styled like one —
-// but the list was `data={todos}`, unfiltered, so all they ever did was supply the
-// default tag for the next task created. With the list on its own screen, a filter
-// control over someone else's screen had nothing left to filter.
 
 /**
  * Where the app is showing.
@@ -80,21 +62,24 @@ export type WelcomeComponentProps = {
 };
 
 /**
- * The app's state owner, and the switch between its screens.
+ * The composition point: where the screens are chosen, and where the rules that
+ * cross two domains are written.
  *
- * The screens live in one component rather than in three components over a shared
- * provider, and that is a deliberate choice against the obvious one. Task state,
- * the focus timers keyed by task id, the productivity wiring and the row renderer
- * are all entangled here: a timer's running state changes a row's controls, and
- * completing a task has to reach both the storage effect and the productivity
- * layer. Splitting this would mean either lifting a dozen pieces of state into a
- * context or threading them through as props, and both cost more than the
- * duplication they avoid.
+ * Everything single-domain now has a home of its own. The list, its persistence
+ * and its CRUD are `todos/useTasks`; the countdown, its picker and the row's
+ * timer controls are `hooks/useTimerOrchestration`; the dashboard column and the
+ * task list are presentational screens under `components/`. What is left here is
+ * only the crossing: a timer's expiry decides both what happens to its task and
+ * which way the session is closed; a deletion owes the timer a cancellation; a
+ * completion must clear the timer and lock guards before it may write. None of
+ * those rules can sit on one side without the other, which is why they have not
+ * been pushed into either hook.
  *
- * So the state stays put and only the *view* is chosen. What this buys is that the
- * task list can exist in exactly one place — the tasks screen and its tag views are
- * the same list under a predicate — instead of two, which is the whole point of
- * moving it there.
+ * The screens are still one component rather than three over a provider, and
+ * that remains deliberate: there is one piece of navigation state (the `screen`
+ * prop) and a provider would be a second way to reach what is already here. What
+ * that buys is that the task list exists in exactly one place — the tasks screen
+ * and its tag views are the same list under a predicate — instead of two.
  */
 export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponentProps) {
   const t = useTheme();
@@ -326,11 +311,11 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
   /**
    * One task row, for whichever list is asking.
    *
-   * A single function rather than a prop-drilled pile of handlers, because the home
-   * list and the All Tasks sheet must show identical rows: same checkbox rules,
-   * same timer controls, same inline rename. Every behaviour a row has is a closure
-   * over the state above, so there is nothing here that could be defined twice and
-   * drift.
+   * A single function rather than a prop-drilled pile of handlers, because the
+   * unfiltered list and each tag view must show identical rows: same checkbox
+   * rules, same timer controls, same inline rename. Every behaviour a row has is
+   * a closure over the state above, so there is nothing here that could be
+   * defined twice and drift.
    *
    * Also the reason `AllTasksScreen` takes a renderer instead of the handlers
    * themselves — it has no opinion about how a task behaves.
@@ -380,10 +365,10 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
   };
 
   // Both sheets are built here, outside the branch, and rendered in both screens.
-// The add sheet has to work from either screen — you can be mid-focus with the
-// timer sheet open — and a `Modal` does not remount when its parent re-renders,
-// which matters because this component re-renders once a second while a timer
-// runs. Building them once also keeps the two screens from drifting.
+  // The add sheet has to work from either screen — you can be mid-focus with the
+  // timer sheet open — and a `Modal` does not remount when its parent re-renders,
+  // which matters because this component re-renders once a second while a timer
+  // runs. Building them once also keeps the two screens from drifting.
   const sheets = (
     <>
       {/* Opened per task, so the work being focused on is never ambiguous.
