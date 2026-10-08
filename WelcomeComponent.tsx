@@ -10,7 +10,6 @@ import {
 } from 'react-native';
 import MaterialCommunityIcons from '@react-native-vector-icons/material-design-icons';
 import { TimerPickerModal } from 'react-native-timer-picker';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   cancelTimerNotification,
   ensurePermission,
@@ -23,12 +22,8 @@ import { ProductivityDashboard } from './components/ProductivityDashboard';
 import { TodayCard } from './components/TodayCard';
 import { useFocusTimer, type TimerState } from './hooks/useFocusTimer';
 import { useProductivity, formatDueLabel, todayKey } from './productivity';
-import {
-  migrateTodos,
-  nextTodoId,
-  TODOS_STORAGE_KEY,
-  type Todo,
-} from './todos/model';
+import { type Todo } from './todos/model';
+import { useTasks } from './todos/useTasks';
 import { AVAILABLE_TAGS, tintOf } from './todos/tags';
 import { triggerHaptic } from './haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -116,11 +111,10 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
   // module scope. `useTheme` returns a stable object, so this only recomputes
   // when the system colour scheme actually flips.
   const styles = useMemo(() => createStyles(t), [t]);
-  const [todos, setTodos] = useState<Todo[]>([]);
-  // Guards the save effect below. Without it, the first render writes an empty
-  // array over the stored list before `loadTodos` resolves — a narrow window in
-  // which killing the app destroys every task.
-  const [hydrated, setHydrated] = useState(false);
+  // Owning the list — state, load/save, create/edit/delete and the two
+  // completion writes — is `todos/useTasks`'s job. What stays here are the rules
+  // that need *both* sides: a timer and a task, a session log and a task.
+  const { todos, createTodo, updateTodo, removeTodo, completeTodos, setCompleted } = useTasks();
   // Which task the edit sheet is open for, if any. The sheet holds the form state
   // itself — the old inline rename kept `editIndex` *and* `editText` here, a
   // second copy of what was already typed, and could only carry a title.
@@ -177,21 +171,14 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
   const handleTimerExpired = useCallback(
     (ids: string[]) => {
       const completedAt = Date.now();
-      const finished = new Set(ids);
-      setTodos((prev) =>
-        prev.map((todo) =>
-          finished.has(todo.id) && !todo.completed
-            ? { ...todo, completed: true, completedAt }
-            : todo,
-        ),
-      );
+      completeTodos(ids, completedAt);
       // Option A: a timer that ran to zero completed its task, so the session is
       // closed as `completed` — this is what earns the momentum bonus.
       for (const id of ids) {
         finishFocus(id, 'completed');
       }
     },
-    [finishFocus],
+    [completeTodos, finishFocus],
   );
 
   const {
@@ -223,47 +210,6 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
       hasTimer(id) || (completed && isLocked(id)),
     [hasTimer, isLocked],
   );
-
-  const saveTodos = async (newTodos: Todo[]) => {
-    try {
-      await AsyncStorage.setItem(TODOS_STORAGE_KEY, JSON.stringify(newTodos));
-    } catch (error) {
-      console.error('Failed to save todos:', error);
-    }
-  };
-
-  const loadTodos = async () => {
-    try {
-      const savedTodos = await AsyncStorage.getItem(TODOS_STORAGE_KEY);
-      if (!savedTodos) return;
-
-      const parsed: unknown = JSON.parse(savedTodos);
-      if (!Array.isArray(parsed)) {
-        console.warn('[todos] stored value is not an array, ignoring it');
-        return;
-      }
-
-      // Migration. Repaired on read rather than through a version bump, since
-      // the only persisted key has never been versioned. See `migrateTodos`.
-      const now = Date.now();
-      setTodos(migrateTodos(parsed, now));
-    } catch (error) {
-      console.error('Failed to load todos:', error);
-    } finally {
-      // Set even on failure or corrupt data: refusing to save afterwards would
-      // turn a recoverable read error into permanent data loss.
-      setHydrated(true);
-    }
-  };
-
-  useEffect(() => {
-    loadTodos();
-  }, []);
-
-  useEffect(() => {
-    if (!hydrated) return;
-    saveTodos(todos);
-  }, [todos, hydrated]);
 
   useEffect(() => {
     (async () => {
@@ -304,60 +250,26 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
   /**
    * Applies the sheet's draft: creates a task, or rewrites an existing one.
    *
-   * One submit path for both jobs, because they are the same fields. An edit
-   * merges `text`, `notes`, `dueDate` and — when the draft carries one — the tag.
-   * `id`, `createdAt`, `completed` and `completedAt` are facts about the task
-   * rather than form data, so they are not in the draft and cannot be overwritten
-   * by it; that is what makes saving a task from the sheet safe for a completed
-   * one. A task's existing tag survives an edit untouched unless the sheet hands
-   * a new one back.
+   * One submit path for both jobs, because they are the same fields. The merge
+   * rules — which fields an edit may overwrite, which are facts about the task,
+   * that a draft with no tag leaves the task's own tag alone — are the domain's
+   * and live with `taskOperations`. What only this component can do happens
+   * here: the productivity layer is told the list changed, a new task buzzes,
+   * and either way the sheet closes.
    */
   const submitTask = useCallback(
     (draft: TodoDraft) => {
       if (editingId) {
-        const id = editingId;
-        setTodos((prev) =>
-          prev.map((todo) =>
-            todo.id === id
-              ? {
-                  ...todo,
-                  text: draft.text,
-                  notes: draft.notes,
-                  dueDate: draft.dueDate,
-                  // The sheet prefills the current tag when one exists, so a saved
-                  // task keeps its tag without the user lifting a finger — and a
-                  // tag picked in the sheet replaces it. Only a draft without a tag
-                  // leaves the task's own alone, which is what keeps a legacy tag
-                  // (one not in the vocabulary, so not showable as a chip) from
-                  // being deleted by the act of editing something else.
-                  tags: draft.tag ? [draft.tag] : todo.tags,
-                }
-              : todo,
-          ),
-        );
+        updateTodo(editingId, draft);
         noteActivity();
       } else {
-        const newTodo: Todo = {
-          id: nextTodoId(),
-          text: draft.text,
-          completed: false,
-          // The sheet's `#` control is the whole story now: a task carries the tag
-          // the person chose, and nothing more. Creating from a tag view prefills
-          // that choice with the view's own tag, so the born-on-`#gym` task stays
-          // on the `#gym` screen — visibly, changeably, opted into by looking at
-          // the sheet rather than applied after the fact.
-          tags: draft.tag ? [draft.tag] : [],
-          createdAt: Date.now(),
-          notes: draft.notes,
-          dueDate: draft.dueDate,
-        };
-        setTodos((prev) => [...prev, newTodo]);
+        createTodo(draft);
         triggerHaptic('taskAdded');
         noteActivity();
       }
       closeTaskSheet();
     },
-    [closeTaskSheet, editingId, noteActivity],
+    [closeTaskSheet, createTodo, editingId, noteActivity, updateTodo],
   );
 
   const deleteTodo = (id: string) => {
@@ -367,7 +279,7 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
     clearTimer(id);
     // The focus really was spent, it just never produced a completion.
     finishFocus(id, 'stopped');
-    setTodos((prevTodos) => prevTodos.filter((todo) => todo.id !== id));
+    removeTodo(id);
   };
 
   const toggleComplete = (id: string) => {
@@ -397,19 +309,9 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
     triggerHaptic(nowCompleted ? 'taskCompleted' : 'taskUncompleted');
     cancelTimerNotification(id);
     clearTimer(id);
-    setTodos((prevTodos) =>
-      prevTodos.map((todo) =>
-        todo.id === id
-          ? {
-              ...todo,
-              completed: nowCompleted,
-              // Cleared when reopening, so a task that was finished and then
-              // undone does not claim a completion time it no longer earned.
-              completedAt: nowCompleted ? Date.now() : undefined,
-            }
-          : todo,
-      ),
-    );
+    // Both guards are checked, so the write happens only for a task that is
+    // allowed to move; `setCompleted` stamps the time itself.
+    setCompleted(id, nowCompleted);
     // Ticking by hand mid-timer still earns focus credit, but it is recorded as
     // `finished` rather than `completed`: the user chose to complete it, so the
     // completion stays correctable. Only a timer running out locks.
