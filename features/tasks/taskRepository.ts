@@ -4,7 +4,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { migrateTodos, TODOS_STORAGE_KEY, type Todo } from '../../todos/model';
-import type { ProductivitySnapshot } from '../../productivity';
+import type { MissionGoal, ProductivitySnapshot } from '../../productivity';
 
 export async function loadTodos(): Promise<Todo[]> {
   try {
@@ -48,7 +48,10 @@ export type ExportPayload = {
   statistics: {
     momentum: { total: number; band: string };
     streak: { current: number; longest: number; freezesRemaining: number };
-    mission: { goal: number; complete: boolean; progress: number };
+    // `goal` is the ladder entry itself, not a count: the live export writes
+    // `snapshot.mission.goal`, which is `{ focusMinutes, tasksCompleted }`.
+    // Typing it `number` was the stale half of this file.
+    mission: { goal: MissionGoal; complete: boolean; progress: number };
     today: { day: string; focusedSeconds: number; tasksCompleted: number };
     daysTracked: number;
   };

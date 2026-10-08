@@ -8,7 +8,13 @@ export type TaskContext = {
   now: () => number;
 };
 
-export function applyDraftToTodo(todo: Todo, draft: TodoDraft, ctx: TaskContext): Todo {
+/**
+ * Merges an edit sheet draft into an existing task.
+ *
+ * No `ctx`: an edit copies form fields and stamps nothing, so there is no clock
+ * to inject. The operations that do need the time take it.
+ */
+export function applyDraftToTodo(todo: Todo, draft: TodoDraft): Todo {
   return {
     ...todo,
     text: draft.text,
