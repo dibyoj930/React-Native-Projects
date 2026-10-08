@@ -31,6 +31,7 @@ const THEMED_SOURCES = [
   join('components', 'TodoRow.tsx'),
   join('components', 'AllTasksScreen.tsx'),
   join('components', 'AddTodoModal.tsx'),
+  join('components', 'HomeScreen.tsx'),
   join('components', 'TodayCard.tsx'),
   join('components', 'ProductivityDashboard.tsx'),
 ];
@@ -121,7 +122,7 @@ describe('theme discipline', () => {
     // only as good as remembering to update it, which is why the file list is short
     // and named here.
     const known = [
-      'TodoRow', 'AllTasksScreen', 'AddTodoModal', 'TodayCard',
+      'TodoRow', 'AllTasksScreen', 'AddTodoModal', 'HomeScreen', 'TodayCard',
       'ProductivityDashboard',
     ];
     expect(THEMED_SOURCES.filter((p) => p.startsWith('components'))).toHaveLength(
