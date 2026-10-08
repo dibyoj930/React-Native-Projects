@@ -6,10 +6,7 @@ import {
   View,
 } from 'react-native';
 import { TimerPickerModal } from 'react-native-timer-picker';
-import {
-  cancelTimerNotification,
-  ensurePermission,
-} from './notifications';
+import { cancelTimerNotification, useNotifications } from './notifications';
 import { TodoRow } from './components/TodoRow';
 import { AllTasksScreen } from './components/AllTasksScreen';
 import { AddTodoModal, type TodoDraft } from './components/AddTodoModal';
@@ -18,6 +15,8 @@ import type { TimerState } from './hooks/useFocusTimer';
 import { useTimerOrchestration } from './hooks/useTimerOrchestration';
 import { useProductivity, formatDueLabel, todayKey } from './productivity';
 import { type Todo } from './todos/model';
+import { buildExportPayload, exportFilename } from './todos/taskRepository';
+import { findTodo } from './todos/taskSelectors';
 import { useTasks } from './todos/useTasks';
 import { triggerHaptic } from './haptics';
 import { useTheme } from './theme/useTheme';
@@ -107,11 +106,14 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
   // completion writes — is `todos/useTasks`'s job. What stays here are the rules
   // that need *both* sides: a timer and a task, a session log and a task.
   const { todos, createTodo, updateTodo, removeTodo, completeTodos, setCompleted } = useTasks();
+  // The notification layer already asks the OS for permission on mount — above
+  // this component, in `NotificationProvider` — and owns the answer. Keeping a
+  // second copy here meant two identical requests and two states for one fact.
+  const { permission } = useNotifications();
   // Which task the edit sheet is open for, if any. The sheet holds the form state
   // itself — the old inline rename kept `editIndex` *and* `editText` here, a
   // second copy of what was already typed, and could only carry a title.
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [permissionStatus, setPermissionStatus] = useState<string | null>(null);
   // The task sheet: creating and editing both. A boolean rather than a navigation
   // library — there is no router in this app, and one sheet is not a reason to
   // add one.
@@ -222,13 +224,6 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
     [hasTimer, isLocked],
   );
 
-  useEffect(() => {
-    (async () => {
-      const status = await ensurePermission();
-      setPermissionStatus(status);
-    })();
-  }, []);
-
   /**
    * The task the edit sheet is open for, or null in create mode.
    *
@@ -236,9 +231,7 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
    * storing it would be a second reference to an object the list already owns — one
    * that silently went stale the moment anything else rewrote that task.
    */
-  const editingTodo = editingId
-    ? todos.find((todo) => todo.id === editingId) ?? null
-    : null;
+  const editingTodo = editingId ? findTodo(todos, editingId) ?? null : null;
 
   /** Create mode: no task, so the sheet starts empty. */
   const openCreate = useCallback(() => {
@@ -294,7 +287,7 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
   };
 
   const toggleComplete = (id: string) => {
-    const target = todos.find((todo) => todo.id === id);
+    const target = findTodo(todos, id);
     const nowCompleted = !(target?.completed ?? false);
 
     // A task with a live focus timer is mid-session, and its checkbox is shown
@@ -366,48 +359,11 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
       return;
     }
 
-    const payload = {
-      exportedAt: new Date().toISOString(),
-      totalTasks: todos.length,
-      completedTasks: todos.filter((todo) => todo.completed).length,
-      tasks: todos.map((todo) => ({
-        id: todo.id,
-        text: todo.text,
-        completed: todo.completed,
-        // Null rather than a guessed value: a task that predates these fields
-        // genuinely has no known completion time, and an invented one would be
-        // indistinguishable from a real one in the export.
-        completedAt: todo.completedAt ?? null,
-        createdAt: todo.createdAt ?? null,
-        tags: todo.tags ?? [],
-      })),
-      // Statistics, so an export explains the user's own history rather than
-      // just listing tasks. Everything here is recomputed, never a stored count.
-      statistics: {
-        momentum: {
-          total: snapshot.momentum.total,
-          band: snapshot.momentum.band,
-        },
-        streak: {
-          current: snapshot.streak.current,
-          longest: snapshot.streak.longest,
-          freezesRemaining: snapshot.streak.freezesRemaining,
-        },
-        mission: {
-          goal: snapshot.mission.goal,
-          complete: snapshot.missionToday.complete,
-          progress: snapshot.missionToday.ratio,
-        },
-        today: {
-          day: snapshot.today,
-          focusedSeconds: snapshot.todayRollup?.focusedSeconds ?? 0,
-          tasksCompleted: snapshot.todayRollup?.tasksCompleted ?? 0,
-        },
-        daysTracked: snapshot.rollups.length,
-      },
-    };
-
-    const fileName = `todos-${payload.exportedAt.slice(0, 10)}.json`;
+    // The body and the filename are the domain's, not this component's: the
+    // same shape is asserted in `todos/taskRepository`, so an export written
+    // here cannot drift from the one the rest of the app expects.
+    const payload = buildExportPayload(todos, snapshot);
+    const fileName = exportFilename(payload);
     const json = JSON.stringify(payload, null, 2);
 
     try {
@@ -491,7 +447,7 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
   return (
     <View style={styles.screen}>
       <HomeScreen
-        notificationsBlocked={permissionStatus === 'denied'}
+        notificationsBlocked={permission === 'denied'}
         onAddTask={openCreate}
         onExport={exportTodos}
         onOpenTag={(tag) => onNavigate({ name: 'tag', tag })}

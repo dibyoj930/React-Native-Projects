@@ -4,6 +4,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { migrateTodos, TODOS_STORAGE_KEY, type Todo } from './model';
+import { completedCount } from './taskSelectors';
 import type { MissionGoal, ProductivitySnapshot } from '../productivity';
 
 export async function loadTodos(): Promise<Todo[]> {
@@ -71,7 +72,7 @@ export function buildExportPayload(todos: Todo[], snapshot: ProductivitySnapshot
   return {
     exportedAt: new Date().toISOString(),
     totalTasks: todos.length,
-    completedTasks: todos.filter((todo) => todo.completed).length,
+    completedTasks: completedCount(todos),
     tasks: todos.map((todo) => ({
       id: todo.id,
       text: todo.text,
