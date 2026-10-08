@@ -1,7 +1,7 @@
 /**
  * Pure task selection helpers.
  */
-import type { Todo } from '../../todos/model';
+import type { Todo } from './model';
 
 export function openCount(todos: readonly Todo[]): number {
   return todos.filter((todo) => !todo.completed).length;

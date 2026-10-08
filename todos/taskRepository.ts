@@ -3,8 +3,8 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { migrateTodos, TODOS_STORAGE_KEY, type Todo } from '../../todos/model';
-import type { MissionGoal, ProductivitySnapshot } from '../../productivity';
+import { migrateTodos, TODOS_STORAGE_KEY, type Todo } from './model';
+import type { MissionGoal, ProductivitySnapshot } from '../productivity';
 
 export async function loadTodos(): Promise<Todo[]> {
   try {
@@ -42,8 +42,6 @@ export type ExportPayload = {
     completedAt: number | null;
     createdAt: number | null;
     tags: string[];
-    notes?: string | null;
-    dueDate?: string | null;
   }>;
   statistics: {
     momentum: { total: number; band: string };
@@ -57,6 +55,18 @@ export type ExportPayload = {
   };
 };
 
+/**
+ * The export body, shared by whatever triggers an export.
+ *
+ * The shape is pinned to what the app has always written: id, text, completed,
+ * completedAt, createdAt, tags. `notes` and `dueDate` are deliberately absent —
+ * the live export never sent them, so adding them here would silently change the
+ * file users receive. (The old draft of this file included them; it was wrong.)
+ *
+ * Everything under `statistics` is recomputed from the snapshot, never a stored
+ * count, so an export explains the user's own history rather than just listing
+ * tasks.
+ */
 export function buildExportPayload(todos: Todo[], snapshot: ProductivitySnapshot): ExportPayload {
   return {
     exportedAt: new Date().toISOString(),
@@ -66,11 +76,12 @@ export function buildExportPayload(todos: Todo[], snapshot: ProductivitySnapshot
       id: todo.id,
       text: todo.text,
       completed: todo.completed,
+      // Null rather than a guessed value: a task that predates these fields
+      // genuinely has no known completion time, and an invented one would be
+      // indistinguishable from a real one in the export.
       completedAt: todo.completedAt ?? null,
       createdAt: todo.createdAt ?? null,
       tags: todo.tags ?? [],
-      notes: todo.notes ?? null,
-      dueDate: todo.dueDate ?? null,
     })),
     statistics: {
       momentum: {
