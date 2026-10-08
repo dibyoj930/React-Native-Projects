@@ -4,9 +4,9 @@
  */
 import { useCallback, useState } from 'react';
 
-import { useFocusTimer, type TimerState } from '../../hooks/useFocusTimer';
-import type { FocusSessionStatus } from '../../productivity';
-import { syncTimerNotification, cancelTimerNotification } from '../../notifications';
+import { useFocusTimer, type TimerState } from './useFocusTimer';
+import type { FocusSessionStatus } from '../productivity';
+import { syncTimerNotification, cancelTimerNotification } from '../notifications';
 
 export type TimerOrchestrationDeps = {
   onTimerExpired: (ids: string[]) => void;
@@ -17,6 +17,12 @@ export type TimerOrchestrationDeps = {
 };
 
 export function useTimerOrchestration(deps: TimerOrchestrationDeps) {
+  // Read out once so the callbacks below depend on the five functions rather
+  // than on the wrapper object. The caller is free to rebuild that object every
+  // render; as long as the functions themselves are stable (useCallback on the
+  // caller's side), these callbacks stay stable too.
+  const { onTimerExpired, onStartFocus, onPauseFocus, onResumeFocus, onStopFocus } = deps;
+
   const [pickerTargetId, setPickerTargetId] = useState<string | null>(null);
   const [pickerVisible, setPickerVisible] = useState(false);
 
@@ -28,7 +34,7 @@ export function useTimerOrchestration(deps: TimerOrchestrationDeps) {
     resume: resumeTimer,
     clearTimer,
     remainingSecondsFor,
-  } = useFocusTimer({ onExpire: deps.onTimerExpired });
+  } = useFocusTimer({ onExpire: onTimerExpired });
 
   const openTimerPicker = useCallback((id: string) => {
     setPickerTargetId(id);
@@ -40,7 +46,7 @@ export function useTimerOrchestration(deps: TimerOrchestrationDeps) {
       if (pickerTargetId) {
         const endPicker = startTimer(pickerTargetId, picked);
         if (endPicker !== null) {
-          deps.onStartFocus(pickerTargetId);
+          onStartFocus(pickerTargetId);
           syncTimerNotification({
             timerId: pickerTargetId,
             title: 'Timer done',
@@ -52,7 +58,7 @@ export function useTimerOrchestration(deps: TimerOrchestrationDeps) {
       setPickerVisible(false);
       setPickerTargetId(null);
     },
-    [deps, pickerTargetId, startTimer],
+    [onStartFocus, pickerTargetId, startTimer],
   );
 
   const handleTimerCancel = useCallback(() => {
@@ -64,22 +70,22 @@ export function useTimerOrchestration(deps: TimerOrchestrationDeps) {
     (id: string) => {
       cancelTimerNotification(id);
       clearTimer(id);
-      deps.onStopFocus(id, 'stopped');
+      onStopFocus(id, 'stopped');
     },
-    [clearTimer, deps],
+    [clearTimer, onStopFocus],
   );
 
   const toggleTimerRunning = useCallback(
     (id: string) => {
       if (isRunning(id)) {
         pauseTimer(id);
-        deps.onPauseFocus(id);
+        onPauseFocus(id);
         cancelTimerNotification(id);
         return;
       }
       const end = resumeTimer(id);
       if (end !== null) {
-        deps.onResumeFocus(id);
+        onResumeFocus(id);
         syncTimerNotification({
           timerId: id,
           title: 'Timer done',
@@ -88,7 +94,7 @@ export function useTimerOrchestration(deps: TimerOrchestrationDeps) {
         });
       }
     },
-    [deps, isRunning, pauseTimer, resumeTimer],
+    [onPauseFocus, onResumeFocus, isRunning, pauseTimer, resumeTimer],
   );
 
   const formatTimeForTodo = useCallback(
