@@ -43,7 +43,7 @@ export function SwipeableTodoRow({
             <MaterialCommunityIcons
               name="stop-circle-outline"
               size={22}
-              color="#FFFFFF"
+              color={t.colors.primaryText}
             />
             <Text style={styles.actionLabel}>Stop</Text>
           </TouchableOpacity>
@@ -55,7 +55,7 @@ export function SwipeableTodoRow({
             <MaterialCommunityIcons
               name="trash-can-outline"
               size={22}
-              color="#FFFFFF"
+              color={t.colors.primaryText}
             />
             <Text style={styles.actionLabel}>Delete</Text>
           </TouchableOpacity>
@@ -73,7 +73,7 @@ export function SwipeableTodoRow({
           <MaterialCommunityIcons
             name="trash-can-outline"
             size={22}
-            color="#FFFFFF"
+            color={t.colors.primaryText}
           />
           <Text style={styles.actionLabel}>Delete</Text>
         </TouchableOpacity>
@@ -136,7 +136,7 @@ const createStyles = (t: Theme) => {
       backgroundColor: c.danger,
     },
     actionLabel: {
-      color: '#FFFFFF',
+      color: c.primaryText,
       fontSize: 11,
       fontWeight: '600',
       textAlign: 'center',

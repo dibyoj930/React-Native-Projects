@@ -1,112 +1,115 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
-  FlatList,
+  ScrollView,
   Share,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import MaterialCommunityIcons from '@react-native-vector-icons/material-design-icons';
 import { TimerPickerModal } from 'react-native-timer-picker';
-import type { TimerPickerModalProps } from 'react-native-timer-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   cancelTimerNotification,
   ensurePermission,
-  scheduleTimerNotification,
   syncTimerNotification,
 } from './notifications';
-import { SwipeableTodoRow } from './components/SwipeableTodoRow';
+import { TodoRow } from './components/TodoRow';
+import { AllTasksScreen } from './components/AllTasksScreen';
+import { AddTodoModal, type TodoDraft } from './components/AddTodoModal';
+import { ProductivityDashboard } from './components/ProductivityDashboard';
+import { TodayCard } from './components/TodayCard';
+import { useFocusTimer, type TimerState } from './hooks/useFocusTimer';
+import { useProductivity, formatDueLabel, todayKey } from './productivity';
+import {
+  migrateTodos,
+  nextTodoId,
+  TODOS_STORAGE_KEY,
+  type Todo,
+} from './todos/model';
+import { AVAILABLE_TAGS, tintOf } from './todos/tags';
 import { triggerHaptic } from './haptics';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from './theme/useTheme';
 import type { Theme } from './theme/theme';
 
-type TimerState = TimerPickerModalProps['initialValue'];
+// The task model moved to `todos/model.ts` so the shared row, the All Tasks
+// screen and the Add Todo modal can use it without importing a type out of this
+// component. Re-exported here because it was part of this module's public shape
+// and something outside may already import it from this path.
+export type { Todo } from './todos/model';
+export { migrateTodos } from './todos/model';
 
-export type Todo = {
-  id: string;
-  text: string;
-  completed: boolean;
-  completedByTimer?: boolean;
-  tags?: string[];
-};
+/**
+ * Where the duration picker opens.
+ *
+ * These minutes used to drive a global "25 / 30 / 60 min" chip row above the
+ * task list. That path is gone because it could not know which task it was for:
+ * it fell back to `unfinished[unfinished.length - 1]` — the most recently *added*
+ * task, silently — and when nothing was open it created a task literally named
+ * "25 min focus" and started the timer on it.
+ *
+ * Choosing a duration now happens per task, via the picker, so the work being
+ * focused on is never ambiguous. The picker library renders no custom content
+ * slot, so the old three-chip shortcut is genuinely gone rather than relocated —
+ * the picker opens on this value instead of zero, which reads as "nothing chosen".
+ */
+const DEFAULT_FOCUS_MINUTES = 25;
 
-const PRESETS = [
-  { minutes: 25, accent: '#FF6B6B', tint: '#FF6B6B' },
-  { minutes: 30, accent: '#4ECDC4', tint: '#4ECDC4' },
-  { minutes: 60, accent: '#FFD93D', tint: '#FFD93D' },
-] as const;
+// The tag vocabulary and its colour derivation now live in `todos/tags.ts`,
+// because the task row renders tag chips too and a second copy of this table is
+// precisely how the old `TAG_COLORS` / `getTagColor` lookup ended up diverging
+// from `AVAILABLE_TAGS` in the first place.
+//
+// NOTE: that old lookup table is now gone too. It was superseded by
+// `AVAILABLE_TAGS` + `TAG_ACCENTS` and had no callers, so it was removed rather
+// than left behind as a second, silently-diverging colour map.
+//
+// The chips themselves moved into the Add Todo sheet, where the choice applies to a
+// task. Here they looked like a filter — sitting above the list, styled like one —
+// but the list was `data={todos}`, unfiltered, so all they ever did was supply the
+// default tag for the next task created. With the list on its own screen, a filter
+// control over someone else's screen had nothing left to filter.
 
-const AVAILABLE_TAGS = [
-  { label: '#architecture', accent: '#AF52DE' },
-  { label: '#coding', accent: '#0A84FF' },
-  { label: '#travel', accent: '#FF9F0A' },
-  { label: '#practice', accent: '#30D158' },
-  { label: '#gym', accent: '#FF375F' },
-  { label: '#health', accent: '#64D2FF' },
-  { label: '#study', accent: '#BF5AF2' },
-  { label: '#blog', accent: '#FFD60A' },
-] as const;
+/**
+ * Where the app is showing.
+ *
+ * A union rather than three booleans: exactly one screen is up at a time, and a
+ * tag view that forgot which tag it is showing would render an unfiltered list
+ * while looking perfectly correct. `name` carries which, and the tag carries its
+ * own filter, so an impossible state cannot be built.
+ */
+export type Screen =
+  | { name: 'home' }
+  | { name: 'tasks' }
+  | { name: 'tag'; tag: string };
 
-const TAG_ACCENTS: Record<string, string> = AVAILABLE_TAGS.reduce(
-  (accents, tag) => {
-    accents[tag.label] = tag.accent;
-    return accents;
-  },
-  {} as Record<string, string>,
-);
-
-const accentFor = (tag: string): string => TAG_ACCENTS[tag] ?? '#007AFF';
-/** Same hex as `accent` at ~12% opacity, for tinted chip backgrounds. */
-const tintOf = (accent: string): string => `${accent}1F`;
-
-/** WCAG relative luminance of a 6-digit hex colour. */
-const luminanceOf = (hex: string): number => {
-  const match = /^#?([0-9a-f]{6})$/i.exec(hex);
-  if (!match) return 0;
-  const packed = parseInt(match[1], 16);
-  const linear = [(packed >> 16) & 255, (packed >> 8) & 255, packed & 255].map(
-    (raw) => {
-      const channel = raw / 255;
-      return channel <= 0.03928
-        ? channel / 12.92
-        : Math.pow((channel + 0.055) / 1.055, 2.4);
-    },
-  );
-  return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+export type WelcomeComponentProps = {
+  /** Which screen to show. The union is on the `Screen` type above. */
+  screen: Screen;
+  onNavigate: (screen: Screen) => void;
 };
 
 /**
- * Picks a readable text colour for a filled chip. Bright accents (the yellows)
- * need dark text; the rest read better in white.
+ * The app's state owner, and the switch between its screens.
+ *
+ * The screens live in one component rather than in three components over a shared
+ * provider, and that is a deliberate choice against the obvious one. Task state,
+ * the focus timers keyed by task id, the productivity wiring and the row renderer
+ * are all entangled here: a timer's running state changes a row's controls, and
+ * completing a task has to reach both the storage effect and the productivity
+ * layer. Splitting this would mean either lifting a dozen pieces of state into a
+ * context or threading them through as props, and both cost more than the
+ * duplication they avoid.
+ *
+ * So the state stays put and only the *view* is chosen. What this buys is that the
+ * task list can exist in exactly one place — the tasks screen and its tag views are
+ * the same list under a predicate — instead of two, which is the whole point of
+ * moving it there.
  */
-const textOnAccent = (accent: string, mode: Theme['mode']): string =>
-  luminanceOf(accent) > 0.45
-    ? mode === 'dark'
-      ? '#000000'
-      : '#11181C'
-    : '#FFFFFF';
-
-const TAG_COLORS: Record<string, string> = {
-  '#architecture': '#AF52DE',
-  '#coding': '#007AFF',
-  '#travel': '#FF9500',
-  '#practice': '#FF3B30',
-  '#gym': '#FF2D55',
-  '#health': '#34C759',
-  '#study': '#5856D6',
-  '#blog': '#00C7BE',
-};
-
-const DEFAULT_TAG_COLOR = '#8E8E93';
-
-const getTagColor = (tag: string): string => TAG_COLORS[tag] ?? DEFAULT_TAG_COLOR;
-
-export default function WelcomeComponent() {
+export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponentProps) {
   const insets = useSafeAreaInsets();
   const t = useTheme();
   // Styles are theme-derived, so they are built per theme rather than once at
@@ -114,21 +117,116 @@ export default function WelcomeComponent() {
   // when the system colour scheme actually flips.
   const styles = useMemo(() => createStyles(t), [t]);
   const [todos, setTodos] = useState<Todo[]>([]);
-  const [input, setInput] = useState('');
-  const [editIndex, setEditIndex] = useState<string | null>(null);
-  const [editText, setEditText] = useState('');
-  const [timers, setTimers] = useState<Record<string, TimerState>>({});
-  const [timerEnds, setTimerEnds] = useState<Record<string, number>>({});
-  const [runningTimers, setRunningTimers] = useState<Record<string, boolean>>({});
+  // Guards the save effect below. Without it, the first render writes an empty
+  // array over the stored list before `loadTodos` resolves — a narrow window in
+  // which killing the app destroys every task.
+  const [hydrated, setHydrated] = useState(false);
+  // Which task the edit sheet is open for, if any. The sheet holds the form state
+  // itself — the old inline rename kept `editIndex` *and* `editText` here, a
+  // second copy of what was already typed, and could only carry a title.
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [pickerTargetId, setPickerTargetId] = useState<string | null>(null);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [permissionStatus, setPermissionStatus] = useState<string | null>(null);
-  const [selectedPreset, setSelectedPreset] = useState<number | null>(null);
-  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  // The task sheet: creating and editing both. A boolean rather than a navigation
+  // library — there is no router in this app, and one sheet is not a reason to
+  // add one.
+  const [showTaskSheet, setShowTaskSheet] = useState(false);
+
+  // Today's day key, once per render and shared by every row. It cannot differ
+  // between rows, and `localDateKey` builds a `Date` to do it, so computing it
+  // inside the row loop would repeat that work once per task on every tick.
+  const today = todayKey();
+
+  const {
+    snapshot,
+    setTasks,
+    startFocus,
+    pauseFocus,
+    resumeFocus,
+    finishFocus,
+    noteActivity,
+    attributionFor,
+  } = useProductivity();
+
+  // Feed the task list to the scoring layer. Passed by reference, so this only
+  // costs a recompute when the list genuinely changes — not on the one-second
+  // timer re-render below.
+  useEffect(() => {
+    setTasks(todos);
+  }, [todos, setTasks]);
+
+  /**
+   * True when a timer on this task ran all the way to zero.
+   *
+   * Derived from the session log rather than stored on the task, so the lock is
+   * a fact about what happened instead of a flag that could drift out of sync
+   * with it.
+   */
+  const isLocked = useCallback(
+    (id: string) => attributionFor(id).isTimerCompleted,
+    [attributionFor],
+  );
+
+  /**
+   * Fired when timers reach their end time — from the 1s tick, or on the next
+   * foreground if JS was suspended and the interval never ran. The pending
+   * notification is not cancelled here: the OS has already delivered it, and
+   * Notifee drops one-shot timestamp triggers once they fire.
+   */
+  const handleTimerExpired = useCallback(
+    (ids: string[]) => {
+      const completedAt = Date.now();
+      const finished = new Set(ids);
+      setTodos((prev) =>
+        prev.map((todo) =>
+          finished.has(todo.id) && !todo.completed
+            ? { ...todo, completed: true, completedAt }
+            : todo,
+        ),
+      );
+      // Option A: a timer that ran to zero completed its task, so the session is
+      // closed as `completed` — this is what earns the momentum bonus.
+      for (const id of ids) {
+        finishFocus(id, 'completed');
+      }
+    },
+    [finishFocus],
+  );
+
+  const {
+    hasTimer,
+    isRunning,
+    start: startTimer,
+    pause: pauseTimer,
+    resume: resumeTimer,
+    clearTimer,
+    remainingSecondsFor,
+  } = useFocusTimer({ onExpire: handleTimerExpired });
+
+  /**
+   * Whether the completion checkbox is inert, for two different reasons:
+   *
+   *  - a live focus timer is attached, running or paused. The task is mid-focus,
+   *    and completing it by hand would count the work twice — once now, and once
+   *    again when the timer reaches zero and completes it.
+   *  - a finished timer already locked it. That one only blocks *reopening*: a
+   *    locked task that is somehow still open can still be completed, so marking
+   *    every locked task disabled would be wrong.
+   *
+   * Defined once and used for both the dimmed look and the accessibility state,
+   * so the checkbox cannot look disabled while still reporting itself enabled
+   * to VoiceOver.
+   */
+  const isCompletionDisabled = useCallback(
+    (id: string, completed: boolean): boolean =>
+      hasTimer(id) || (completed && isLocked(id)),
+    [hasTimer, isLocked],
+  );
 
   const saveTodos = async (newTodos: Todo[]) => {
     try {
-      await AsyncStorage.setItem('todos', JSON.stringify(newTodos));
+      await AsyncStorage.setItem(TODOS_STORAGE_KEY, JSON.stringify(newTodos));
     } catch (error) {
       console.error('Failed to save todos:', error);
     }
@@ -136,12 +234,25 @@ export default function WelcomeComponent() {
 
   const loadTodos = async () => {
     try {
-      const savedTodos = await AsyncStorage.getItem('todos');
-      if (savedTodos) {
-        setTodos(JSON.parse(savedTodos));
+      const savedTodos = await AsyncStorage.getItem(TODOS_STORAGE_KEY);
+      if (!savedTodos) return;
+
+      const parsed: unknown = JSON.parse(savedTodos);
+      if (!Array.isArray(parsed)) {
+        console.warn('[todos] stored value is not an array, ignoring it');
+        return;
       }
+
+      // Migration. Repaired on read rather than through a version bump, since
+      // the only persisted key has never been versioned. See `migrateTodos`.
+      const now = Date.now();
+      setTodos(migrateTodos(parsed, now));
     } catch (error) {
       console.error('Failed to load todos:', error);
+    } finally {
+      // Set even on failure or corrupt data: refusing to save afterwards would
+      // turn a recoverable read error into permanent data loss.
+      setHydrated(true);
     }
   };
 
@@ -150,8 +261,9 @@ export default function WelcomeComponent() {
   }, []);
 
   useEffect(() => {
+    if (!hydrated) return;
     saveTodos(todos);
-  }, [todos]);
+  }, [todos, hydrated]);
 
   useEffect(() => {
     (async () => {
@@ -160,129 +272,149 @@ export default function WelcomeComponent() {
     })();
   }, []);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setTimerEnds((prev) => ({ ...prev }));
-    }, 1000);
-    return () => clearInterval(interval);
+  /**
+   * The task the edit sheet is open for, or null in create mode.
+   *
+   * Derived rather than stored: the sheet needs a `Todo` to prefill from, and
+   * storing it would be a second reference to an object the list already owns — one
+   * that silently went stale the moment anything else rewrote that task.
+   */
+  const editingTodo = editingId
+    ? todos.find((todo) => todo.id === editingId) ?? null
+    : null;
+
+  /** Create mode: no task, so the sheet starts empty. */
+  const openCreate = useCallback(() => {
+    setEditingId(null);
+    setShowTaskSheet(true);
   }, []);
 
-  const addTodo = () => {
-    if (input.trim()) {
-      const newTodo: Todo = {
-        id: Date.now().toString(),
-        text: input.trim(),
-        completed: false,
-        tags: selectedTag ? [selectedTag] : [],
-      };
-      setTodos([...todos, newTodo]);
-      setInput('');
-      setSelectedTag(null);
-      triggerHaptic('taskAdded');
-    }
-  };
+  const openEdit = useCallback((id: string) => {
+    setEditingId(id);
+    setShowTaskSheet(true);
+  }, []);
 
-  const handleEdit = (id: string) => {
-    const todo = todos.find((t) => t.id === id);
-    if (todo) {
-      setEditIndex(id);
-      setEditText(todo.text);
-    }
-  };
+  const closeTaskSheet = useCallback(() => {
+    // Both are cleared together. Leaving an id behind would make the *next* open of
+    // the sheet save over a task the user is not looking at.
+    setShowTaskSheet(false);
+    setEditingId(null);
+  }, []);
 
-  const handleSave = (id: string) => {
-    setTodos(todos.map((todo) => (todo.id === id ? { ...todo, text: editText } : todo)));
-    setEditIndex(null);
-    setEditText('');
-  };
+  /**
+   * Applies the sheet's draft: creates a task, or rewrites an existing one.
+   *
+   * One submit path for both jobs, because they are the same fields. An edit
+   * merges `text`, `notes`, `dueDate` and — when the draft carries one — the tag.
+   * `id`, `createdAt`, `completed` and `completedAt` are facts about the task
+   * rather than form data, so they are not in the draft and cannot be overwritten
+   * by it; that is what makes saving a task from the sheet safe for a completed
+   * one. A task's existing tag survives an edit untouched unless the sheet hands
+   * a new one back.
+   */
+  const submitTask = useCallback(
+    (draft: TodoDraft) => {
+      if (editingId) {
+        const id = editingId;
+        setTodos((prev) =>
+          prev.map((todo) =>
+            todo.id === id
+              ? {
+                  ...todo,
+                  text: draft.text,
+                  notes: draft.notes,
+                  dueDate: draft.dueDate,
+                  // The sheet prefills the current tag when one exists, so a saved
+                  // task keeps its tag without the user lifting a finger — and a
+                  // tag picked in the sheet replaces it. Only a draft without a tag
+                  // leaves the task's own alone, which is what keeps a legacy tag
+                  // (one not in the vocabulary, so not showable as a chip) from
+                  // being deleted by the act of editing something else.
+                  tags: draft.tag ? [draft.tag] : todo.tags,
+                }
+              : todo,
+          ),
+        );
+        noteActivity();
+      } else {
+        const newTodo: Todo = {
+          id: nextTodoId(),
+          text: draft.text,
+          completed: false,
+          // The sheet's `#` control is the whole story now: a task carries the tag
+          // the person chose, and nothing more. Creating from a tag view prefills
+          // that choice with the view's own tag, so the born-on-`#gym` task stays
+          // on the `#gym` screen — visibly, changeably, opted into by looking at
+          // the sheet rather than applied after the fact.
+          tags: draft.tag ? [draft.tag] : [],
+          createdAt: Date.now(),
+          notes: draft.notes,
+          dueDate: draft.dueDate,
+        };
+        setTodos((prev) => [...prev, newTodo]);
+        triggerHaptic('taskAdded');
+        noteActivity();
+      }
+      closeTaskSheet();
+    },
+    [closeTaskSheet, editingId, noteActivity],
+  );
 
   const deleteTodo = (id: string) => {
     triggerHaptic('taskDeleted');
     cancelTimerNotification(id);
+    // Before removing the task, so a running timer cannot outlive its subject.
+    clearTimer(id);
+    // The focus really was spent, it just never produced a completion.
+    finishFocus(id, 'stopped');
     setTodos((prevTodos) => prevTodos.filter((todo) => todo.id !== id));
-    setTimers((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-    setRunningTimers((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-    setTimerEnds((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
   };
 
   const toggleComplete = (id: string) => {
     const target = todos.find((todo) => todo.id === id);
-    triggerHaptic(target?.completed ? 'taskUncompleted' : 'taskCompleted');
+    const nowCompleted = !(target?.completed ?? false);
+
+    // A task with a live focus timer is mid-session, and its checkbox is shown
+    // disabled. The rule lives here rather than only in the render so that a
+    // checkbox which merely *looks* disabled cannot be completed by a stray tap:
+    // completing now would bank the completion immediately and then bank the
+    // focus time again when the timer reached zero, counting one piece of work
+    // twice. Either the timer completes the task, or stopping it hands the
+    // decision back to the user.
+    if (hasTimer(id)) {
+      return;
+    }
+
+    // A task whose timer ran all the way to zero is locked. The focus time was
+    // already spent, so letting a tap undo it would silently rewrite the day's
+    // statistics — the streak and mission would drop for work that genuinely
+    // happened. Return before touching any state, so a locked task is a true
+    // no-op rather than an undo queued behind a guard.
+    if (!nowCompleted && attributionFor(id).isTimerCompleted) {
+      return;
+    }
+
+    triggerHaptic(nowCompleted ? 'taskCompleted' : 'taskUncompleted');
     cancelTimerNotification(id);
+    clearTimer(id);
     setTodos((prevTodos) =>
       prevTodos.map((todo) =>
         todo.id === id
-          ? { ...todo, completed: !todo.completed, completedByTimer: false }
+          ? {
+              ...todo,
+              completed: nowCompleted,
+              // Cleared when reopening, so a task that was finished and then
+              // undone does not claim a completion time it no longer earned.
+              completedAt: nowCompleted ? Date.now() : undefined,
+            }
           : todo,
       ),
     );
-    setTimers((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-    setRunningTimers((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-    setTimerEnds((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-  };
-
-  const toSeconds = (t: TimerState | undefined | null): number => {
-    if (!t) return 0;
-    const hours = t.hours ?? 0;
-    const minutes = t.minutes ?? 0;
-    const seconds = t.seconds ?? 0;
-    return (hours * 60 + minutes) * 60 + seconds;
-  };
-
-  const startPresetTimer = (minutes: number) => {
-    const unfinished = todos.filter((t) => !t.completed);
-    let targetId: string | null = null;
-    if (unfinished.length > 0) {
-      targetId = unfinished[unfinished.length - 1].id;
-    } else {
-      const newTodo: Todo = {
-        id: Date.now().toString(),
-        text: `${minutes} min focus`,
-        completed: false,
-        tags: [],
-      };
-      setTodos((prev) => [...prev, newTodo]);
-      targetId = newTodo.id;
-    }
-
-    if (!targetId) return;
-
-    const seconds = minutes * 60;
-    const picked = {
-      hours: Math.floor(minutes / 60),
-      minutes: minutes % 60,
-      seconds: 0,
-    } as TimerState;
-    setTimers((prev) => ({ ...prev, [targetId]: picked }));
-    setRunningTimers((prev) => ({ ...prev, [targetId]: true }));
-    const end = Date.now() + seconds * 1000;
-    setTimerEnds((prev) => ({ ...prev, [targetId]: end }));
-    scheduleTimerNotification({ timerId: targetId, title: 'Timer done', body: 'Time is up', fireAt: end });
-    setSelectedPreset(null);
+    // Ticking by hand mid-timer still earns focus credit, but it is recorded as
+    // `finished` rather than `completed`: the user chose to complete it, so the
+    // completion stays correctable. Only a timer running out locks.
+    finishFocus(id, nowCompleted ? 'finished' : 'stopped');
+    noteActivity();
   };
 
   const openTimerPicker = (id: string) => {
@@ -292,17 +424,11 @@ export default function WelcomeComponent() {
 
   const handleTimerConfirm = (picked: TimerState) => {
     if (pickerTargetId) {
-      const totalSec = toSeconds(picked);
-      if (totalSec <= 0) {
-        setPickerVisible(false);
-        setPickerTargetId(null);
-        return;
+      const endPicker = startTimer(pickerTargetId, picked);
+      if (endPicker !== null) {
+        startFocus(pickerTargetId);
+        syncTimerNotification({ timerId: pickerTargetId, title: 'Timer done', body: 'Time is up', fireAt: endPicker });
       }
-      setTimers((prev) => ({ ...prev, [pickerTargetId]: picked as TimerState }));
-      setRunningTimers((prev) => ({ ...prev, [pickerTargetId]: true }));
-      const endPicker = Date.now() + totalSec * 1000;
-      setTimerEnds((prev) => ({ ...prev, [pickerTargetId]: endPicker }));
-      syncTimerNotification({ timerId: pickerTargetId, title: 'Timer done', body: 'Time is up', fireAt: endPicker });
     }
     setPickerVisible(false);
     setPickerTargetId(null);
@@ -313,77 +439,67 @@ export default function WelcomeComponent() {
     setPickerTargetId(null);
   };
 
-  const handleStartPreset = () => {
-    if (selectedPreset === null) return;
-    startPresetTimer(selectedPreset);
-  };
-
   const stopTimer = (id: string) => {
     cancelTimerNotification(id);
-    setTimers((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-    setRunningTimers((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-    setTimerEnds((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
+    clearTimer(id);
+    // Deliberate early stop — the focus was real, the completion was not.
+    finishFocus(id, 'stopped');
   };
 
   const toggleTimerRunning = (id: string) => {
-    const willRun = !runningTimers[id];
-    if (willRun) {
-      const timer = timers[id];
-      if (timer) {
-        const end = Date.now() + toSeconds(timer) * 1000;
-        setTimerEnds((prev) => ({ ...prev, [id]: end }));
-        setRunningTimers((prev) => ({ ...prev, [id]: true }));
-        syncTimerNotification({ timerId: id, title: 'Timer done', body: 'Time is up', fireAt: end });
-      } else {
-        setRunningTimers((prev) => ({ ...prev, [id]: true }));
-      }
-    } else {
-      const end = timerEnds[id];
-      if (end) {
-        const remaining = Math.max(0, Math.floor((end - Date.now()) / 1000));
-        const h = Math.floor(remaining / 3600);
-        const m = Math.floor((remaining % 3600) / 60);
-        const s = remaining % 60;
-        setTimers((prev) => ({ ...prev, [id]: { hours: h, minutes: m, seconds: s } as TimerState }));
-      }
-      setTimerEnds((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
-      setRunningTimers((prev) => ({ ...prev, [id]: false }));
+    if (isRunning(id)) {
+      pauseTimer(id);
+      // Banks the elapsed segment. Without this the time focused before a pause
+      // would be unrecoverable, which was the original data-loss bug.
+      pauseFocus(id);
       cancelTimerNotification(id);
+      return;
+    }
+    const end = resumeTimer(id);
+    if (end !== null) {
+      resumeFocus(id);
+      syncTimerNotification({ timerId: id, title: 'Timer done', body: 'Time is up', fireAt: end });
     }
   };
 
-  const formatTimeForTodo = (id: string, t: TimerState | undefined | null): string => {
-    const end = timerEnds[id];
-    if (end) {
-      const remaining = Math.max(0, Math.floor((end - Date.now()) / 1000));
-      const h = Math.floor(remaining / 3600);
-      const m = Math.floor((remaining % 3600) / 60);
-      const s = remaining % 60;
-      const pad = (n: number) => n.toString().padStart(2, '0');
-      return `${pad(h)}:${pad(m)}:${pad(s)}`;
-    }
-    if (t) {
-      const pad = (n: number | undefined) => (n ?? 0).toString().padStart(2, '0');
-      return `${pad(t.hours)}:${pad(t.minutes)}:${pad(t.seconds)}`;
-    }
-    return '00:00:00';
+  const formatTimeForTodo = (id: string): string => {
+    const total = remainingSecondsFor(id);
+    const pad = (n: number) => n.toString().padStart(2, '0');
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    return `${pad(h)}:${pad(m)}:${pad(s)}`;
   };
+
+  /**
+   * One task row, for whichever list is asking.
+   *
+   * A single function rather than a prop-drilled pile of handlers, because the home
+   * list and the All Tasks sheet must show identical rows: same checkbox rules,
+   * same timer controls, same inline rename. Every behaviour a row has is a closure
+   * over the state above, so there is nothing here that could be defined twice and
+   * drift.
+   *
+   * Also the reason `AllTasksScreen` takes a renderer instead of the handlers
+   * themselves — it has no opinion about how a task behaves.
+   */
+  const renderRow = (todo: Todo) => (
+    <TodoRow
+      completionDisabled={isCompletionDisabled(todo.id, todo.completed)}
+      dueLabel={todo.dueDate ? formatDueLabel(todo.dueDate, today) : undefined}
+      hasTimer={hasTimer(todo.id)}
+      isLocked={isLocked(todo.id)}
+      isRunning={isRunning(todo.id)}
+      onDelete={() => deleteTodo(todo.id)}
+      onEdit={() => openEdit(todo.id)}
+      onStartFocus={() => openTimerPicker(todo.id)}
+      onStopTimer={() => stopTimer(todo.id)}
+      onToggleComplete={() => toggleComplete(todo.id)}
+      onToggleTimerRunning={() => toggleTimerRunning(todo.id)}
+      timerLabel={formatTimeForTodo(todo.id)}
+      todo={todo}
+    />
+  );
 
   const exportTodos = async () => {
     if (todos.length === 0) {
@@ -399,9 +515,37 @@ export default function WelcomeComponent() {
         id: todo.id,
         text: todo.text,
         completed: todo.completed,
-        completedByTimer: todo.completedByTimer ?? false,
+        // Null rather than a guessed value: a task that predates these fields
+        // genuinely has no known completion time, and an invented one would be
+        // indistinguishable from a real one in the export.
+        completedAt: todo.completedAt ?? null,
+        createdAt: todo.createdAt ?? null,
         tags: todo.tags ?? [],
       })),
+      // Statistics, so an export explains the user's own history rather than
+      // just listing tasks. Everything here is recomputed, never a stored count.
+      statistics: {
+        momentum: {
+          total: snapshot.momentum.total,
+          band: snapshot.momentum.band,
+        },
+        streak: {
+          current: snapshot.streak.current,
+          longest: snapshot.streak.longest,
+          freezesRemaining: snapshot.streak.freezesRemaining,
+        },
+        mission: {
+          goal: snapshot.mission.goal,
+          complete: snapshot.missionToday.complete,
+          progress: snapshot.missionToday.ratio,
+        },
+        today: {
+          day: snapshot.today,
+          focusedSeconds: snapshot.todayRollup?.focusedSeconds ?? 0,
+          tasksCompleted: snapshot.todayRollup?.tasksCompleted ?? 0,
+        },
+        daysTracked: snapshot.rollups.length,
+      },
     };
 
     const fileName = `todos-${payload.exportedAt.slice(0, 10)}.json`;
@@ -420,88 +564,27 @@ export default function WelcomeComponent() {
     }
   };
 
-  const completedByTimerCount = todos.filter((todo) => todo.completedByTimer).length;
-  const progress = todos.length > 0 ? completedByTimerCount / todos.length : 0;
+  // Both sheets are built here, outside the branch, and rendered in both screens.
+// The add sheet has to work from either screen — you can be mid-focus with the
+// timer sheet open — and a `Modal` does not remount when its parent re-renders,
+// which matters because this component re-renders once a second while a timer
+// runs. Building them once also keeps the two screens from drifting.
+  const sheets = (
+    <>
+      {/* Opened per task, so the work being focused on is never ambiguous.
 
-  return (
-    <View style={[styles.container, { paddingTop: insets.top + 8 }]}>
-      <Text style={styles.title}>Todo App</Text>
-
-      {permissionStatus === 'denied' && (
-        <View style={styles.permissionBanner}>
-          <Text style={styles.permissionText}>
-            Notifications are off, so timer alerts will not reach you.
-          </Text>
-        </View>
-      )}
-
-      <View style={styles.inputContainer}>
-        <TextInput
-          style={styles.input}
-          placeholder="Add a new todo..."
-          value={input}
-          onChangeText={setInput}
-          placeholderTextColor={t.colors.textDisabled}
-        />
-        <TouchableOpacity style={styles.addButton} onPress={addTodo}>
-          <Text style={styles.addButtonText}>+</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.chipRow}>
-        {PRESETS.map((preset) => {
-          const selected = selectedPreset === preset.minutes;
-          return (
-            <TouchableOpacity
-              key={preset.minutes}
-              activeOpacity={0.7}
-              onPress={() => setSelectedPreset(selected ? null : preset.minutes)}
-              style={[
-                styles.chip,
-                { backgroundColor: selected ? preset.tint : `${preset.tint}26` },
-                selected && { transform: [{ scale: 1.05 }] },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.chipText,
-                  {
-                    color: selected
-                      ? textOnAccent(preset.accent, t.mode)
-                      : preset.accent,
-                  },
-                ]}
-              >
-                {preset.minutes} min
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      {selectedPreset !== null && (
-        <TouchableOpacity style={styles.startButton} onPress={handleStartPreset}>
-          <Text style={styles.startButtonText}>
-            Start {selectedPreset} min focus
-          </Text>
-        </TouchableOpacity>
-      )}
-
-      <View style={styles.progressBarContainer}>
-        <View style={[styles.progressBarFill, { flex: progress }]} />
-        <View style={[styles.progressBarEmpty, { flex: 1 - progress }]} />
-      </View>
-      <Text style={styles.progressText}>
-        {completedByTimerCount} of {todos.length} tasks completed by timer
-      </Text>
-
+          Opens on 25 minutes rather than 00:00 — the picker's zero state reads
+          as "you picked nothing", and 25 is the shortest duration the presets
+          ever offered. */}
       <TimerPickerModal
         closeOnOverlayPress
+        hideDays
+        initialValue={{ minutes: DEFAULT_FOCUS_MINUTES }}
         LinearGradient=""
         modalProps={{
           overlayOpacity: 0.2,
         }}
-        modalTitle="How far you want to stay focused!"
+        modalTitle="How long will you focus?"
         onCancel={handleTimerCancel}
         onConfirm={(picked) => handleTimerConfirm(picked as TimerState)}
         setIsVisible={setPickerVisible}
@@ -510,166 +593,156 @@ export default function WelcomeComponent() {
         }}
         visible={pickerVisible}
       />
-
-      <FlatList
-        style={styles.list}
-        data={todos}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <SwipeableTodoRow
-            hasTimer={!!timers[item.id]}
-            onDelete={() => deleteTodo(item.id)}
-            onStopTimer={() => stopTimer(item.id)}
-          >
-            <View style={styles.todoItem}>
-              {item.id === editIndex ? (
-                <>
-                  <TextInput
-                    style={[styles.input, { flex: 1 }]}
-                    value={editText}
-                    onChangeText={(text) => setEditText(text)}
-                  />
-                  <TouchableOpacity onPress={() => handleSave(item.id)}>
-                    <Text style={styles.actionButton}>Save</Text>
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <>
-                  <TouchableOpacity
-                    onPress={() => toggleComplete(item.id)}
-                    style={{ flex: 1 }}
-                  >
-                    <Text
-                      style={[
-                        styles.todoText,
-                        item.completed && styles.completedText,
-                      ]}
-                    >
-                      {item.text}
-                    </Text>
-                    {timers[item.id] && (
-                      <View style={styles.timerDisplay}>
-                        <MaterialCommunityIcons
-                          name={
-                            runningTimers[item.id]
-                              ? 'timer-sand'
-                              : 'timer-off-outline'
-                          }
-                          size={14}
-                          color={t.colors.textMuted}
-                        />
-                        <Text style={styles.timerText}>
-                          {formatTimeForTodo(item.id, timers[item.id])}
-                        </Text>
-                      </View>
-                    )}
-                    {item.tags && item.tags.length > 0 && (
-                      <View style={styles.taskTagsContainer}>
-                        {item.tags.map((tag, idx) => {
-                          const accent = accentFor(tag);
-                          return (
-                            <View
-                              key={idx}
-                              style={[
-                                styles.taskTagChip,
-                                {
-                                  backgroundColor: tintOf(accent),
-                                  borderColor: tintOf(accent),
-                                },
-                              ]}
-                            >
-                              <Text style={[styles.taskTagText, { color: accent }]}>
-                                {tag}
-                              </Text>
-                            </View>
-                          );
-                        })}
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                  <View style={styles.actionContainer}>
-                    {timers[item.id] ? (
-                      <>
-                        <TouchableOpacity onPress={() => toggleTimerRunning(item.id)}>
-                          <MaterialCommunityIcons
-                            name={
-                              runningTimers[item.id]
-                                ? 'pause-circle-outline'
-                                : 'play-circle-outline'
-                            }
-                            size={24}
-                            color={t.colors.text}
-                          />
-                        </TouchableOpacity>
-                        <TouchableOpacity onPress={() => stopTimer(item.id)}>
-                          <MaterialCommunityIcons
-                            name="stop-circle-outline"
-                            size={24}
-                            color={t.colors.danger}
-                          />
-                        </TouchableOpacity>
-                      </>
-                    ) : (
-                      <TouchableOpacity onPress={() => openTimerPicker(item.id)}>
-                        <MaterialCommunityIcons name="timer-outline" size={24} color={t.colors.text} />
-                      </TouchableOpacity>
-                    )}
-                    <TouchableOpacity onPress={() => handleEdit(item.id)}>
-                      <Text style={styles.actionButton}>Edit</Text>
-                    </TouchableOpacity>
-                  </View>
-                </>
-              )}
-            </View>
-          </SwipeableTodoRow>
-        )}
-        ListFooterComponent={
-          <View style={styles.tagsSection}>
-            <Text style={styles.tagsHeader}>Tags</Text>
-            <View style={styles.tagsChipRow}>
-              {AVAILABLE_TAGS.map((tag) => {
-                const selected = selectedTag === tag.label;
-                return (
-                  <TouchableOpacity
-                    key={tag.label}
-                    activeOpacity={0.7}
-                    onPress={() => setSelectedTag(selected ? null : tag.label)}
-                    style={[
-                      styles.tagChip,
-                      {
-                        backgroundColor: selected
-                          ? tag.accent
-                          : tintOf(tag.accent),
-                        borderColor: selected ? tag.accent : tintOf(tag.accent),
-                      },
-                      selected && styles.tagChipSelected,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.tagChipText,
-                        {
-                          color: selected
-                            ? textOnAccent(tag.accent, t.mode)
-                            : tag.accent,
-                        },
-                      ]}
-                    >
-                      {tag.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </View>
-        }
-        scrollEnabled={true}
+      <AddTodoModal
+        defaultTag={screen.name === 'tag' ? screen.tag : undefined}
+        onClose={closeTaskSheet}
+        onSubmit={submitTask}
+        task={editingTodo}
+        visible={showTaskSheet}
       />
+    </>
+  );
+
+  if (screen.name !== 'home') {
+    // A full screen swap rather than a `Modal`. It is the app's only task list, so
+    // it is a destination with somewhere to come back to, not a layer over the
+    // dashboard — and it gets its own header with a back control, which a
+    // `pageSheet` only offers on iOS via a swipe.
+    //
+    // The unfiltered list and the tag view are this one branch. Both are the same
+    // screen over the same rows; only the predicate differs, and `AllTasksScreen`
+    // owns that predicate for exactly this reason.
+    const tag = screen.name === 'tag' ? screen.tag : undefined;
+
+    return (
+      <View style={styles.screen}>
+        <AllTasksScreen
+          filterTag={tag}
+          title={tag ?? 'All tasks'}
+          onAddTask={openCreate}
+          onBack={() => onNavigate({ name: 'home' })}
+          renderRow={renderRow}
+          todos={todos}
+        />
+        {sheets}
+      </View>
+    );
+  }
+
+  const openCount = todos.filter((todo) => !todo.completed).length;
+
+  return (
+    <View style={styles.screen}>
+      <ScrollView
+        contentContainerStyle={[
+          styles.homeContent,
+          { paddingTop: insets.top + 8 },
+        ]}
+      >
+        <View style={styles.headerRow}>
+          <Text style={styles.title}>Today</Text>
+        </View>
+
+        {permissionStatus === 'denied' && (
+          <View style={styles.permissionBanner}>
+            <Text style={styles.permissionText}>
+              Notifications are off, so timer alerts will not reach you.
+            </Text>
+          </View>
+        )}
+
+        {/* The way to the work. It sits above the progress card rather than below
+            it because a person opening this app is usually asking "what now?",
+            and this is the answer to that question.
+
+            The `+` sits beside it rather than in the header, because it belongs to
+            this pair: add a task, then see your tasks. Both parts are the way into
+            the list, so they share a row. */}
+        <View style={styles.tileRow}>
+          <TouchableOpacity
+            accessibilityLabel="Open all tasks"
+            accessibilityRole="button"
+            onPress={() => onNavigate({ name: 'tasks' })}
+            style={styles.allTasksTile}
+          >
+            <View style={styles.allTasksTextGroup}>
+              <Text style={styles.allTasksTitle}>
+                {todos.length === 0
+                  ? 'Add your first task'
+                  : openCount === 0
+                    ? `All ${todos.length} done`
+                    : `${openCount} open of ${todos.length}`}
+              </Text>
+              <Text style={styles.allTasksBody}>See every task you have written down.</Text>
+            </View>
+            <MaterialCommunityIcons
+              color={t.colors.textMuted}
+              name="chevron-right"
+              size={20}
+            />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            accessibilityLabel="Add a task"
+            accessibilityRole="button"
+            onPress={openCreate}
+            style={styles.addButton}
+          >
+            <MaterialCommunityIcons
+              color={t.colors.primaryText}
+              name="plus"
+              size={24}
+            />
+          </TouchableOpacity>
+        </View>
+
+        {/* Replaced a "3 of 7 tasks done" row, which counted every task ever
+            added — including ones completed weeks ago — and so answered a
+            question nobody was asking. */}
+        <TodayCard />
+
+        {/* Always here, between the two cards — and every tag is always here,
+            not just the ones in use. A tag with nothing behind it opens an
+            empty screen whose `+` creates its first task, which is the only way
+            a task can come to carry a tag: the chips left the create sheet, so
+            a vocabulary entry that disappeared because nothing used it would be
+            gone for good. Empty when unused, never missing. */}
+        <View style={styles.tagsSection}>
+          <View style={styles.tagsHeadingRow}>
+            <Text style={styles.tagsHeader}>Tags</Text>
+            <Text style={styles.tagsHint}>Open one to see its tasks</Text>
+          </View>
+          <View style={styles.tagsChipRow}>
+            {AVAILABLE_TAGS.map((tag) => (
+              <TouchableOpacity
+                key={tag.label}
+                accessibilityLabel={`Show tasks tagged ${tag.label}`}
+                accessibilityRole="button"
+                activeOpacity={0.7}
+                onPress={() => onNavigate({ name: 'tag', tag: tag.label })}
+                style={[
+                  styles.tagChip,
+                  {
+                    backgroundColor: tintOf(tag.accent),
+                    borderColor: tintOf(tag.accent),
+                  },
+                ]}
+              >
+                <Text style={[styles.tagChipText, { color: tag.accent }]}>{tag.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
+        {/* Replaces the old `completedByTimer` progress bar, which was driven by
+            a flag nothing ever set and so always rendered empty. */}
+        <ProductivityDashboard />
+      </ScrollView>
 
       {/* Fixed footer: always anchored to the bottom of the screen, outside the
-          scrollable list so it stays put no matter how long the list is.
-          Padded by the bottom safe-area inset so the home indicator never
-          clips the button. */}
+          scrollable content so it stays put no matter how long the page is.
+          Padded by the bottom safe-area inset so the home indicator never clips
+          the button. */}
       <View
         style={[
           styles.exportFooter,
@@ -687,13 +760,24 @@ export default function WelcomeComponent() {
           onPress={exportTodos}
           activeOpacity={0.8}
         >
-          <MaterialCommunityIcons name="download" size={18} color={t.colors.primaryText} />
-          <Text style={styles.exportButtonText}>
+          <MaterialCommunityIcons
+            name="download"
+            size={18}
+            color={todos.length === 0 ? t.colors.textDisabled : t.colors.primaryText}
+          />
+          <Text
+            style={[
+              styles.exportButtonText,
+              todos.length === 0 && styles.exportButtonTextDisabled,
+            ]}
+          >
             Download / Export{'\n'}({todos.length}{' '}
             {todos.length === 1 ? 'task' : 'tasks'})
           </Text>
         </TouchableOpacity>
       </View>
+
+      {sheets}
     </View>
   );
 }
@@ -701,15 +785,40 @@ export default function WelcomeComponent() {
 const createStyles = (t: Theme) => {
   const c = t.colors;
   return StyleSheet.create({
-    container: {
+    /**
+     * The shared root of both screens.
+     *
+     * Deliberately un-padded: each screen now applies its own insets, because the
+     * tasks screen is edge-to-edge with a hairline-divided header while the home
+     * screen keeps a 16px gutter. A single padded root could only suit one of them.
+     */
+    screen: {
       flex: 1,
-      padding: 16,
       backgroundColor: c.background,
+    },
+    /**
+     * The scrolling home page.
+     *
+     * A `ScrollView` rather than the `FlatList` this replaced. The list moved to
+     * its own screen, so what is left here is a fixed, short column of cards —
+     * nothing on it is data-driven or unbounded, so a virtualised list would be
+     * machinery with nothing to virtualise. The bottom padding is what keeps the
+     * export footer from overlapping the last card when the page does scroll.
+     */
+    homeContent: {
+      paddingHorizontal: 16,
+      paddingBottom: 12,
+      gap: 0,
+    },
+    headerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 16,
     },
     title: {
       fontSize: 24,
       fontWeight: 'bold',
-      marginBottom: 16,
       color: c.text,
     },
     permissionBanner: {
@@ -724,150 +833,90 @@ const createStyles = (t: Theme) => {
       fontSize: 13,
       color: c.warningText,
     },
-    inputContainer: {
-      flexDirection: 'row',
-      marginBottom: 12,
-      gap: 8,
-      alignItems: 'center',
-    },
-    input: {
-      flex: 1,
-      borderWidth: 1,
-      borderColor: c.border,
-      borderRadius: 8,
-      paddingHorizontal: 12,
-      paddingVertical: 12,
-      fontSize: 16,
-      color: c.text,
-      backgroundColor: c.background,
-    },
+    /**
+     * Round. It opens the task sheet, so it is a navigation control rather than
+     * the submit half of a form.
+     */
     addButton: {
       backgroundColor: c.primary,
-      width: 50,
-      height: 50,
-      borderRadius: 8,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
       justifyContent: 'center',
       alignItems: 'center',
     },
-    addButtonText: {
-      color: c.primaryText,
-      fontSize: 24,
-      fontWeight: 'bold',
-    },
-    chipRow: {
+    /**
+     * The tile and its `+`, as one row.
+     *
+     * The tile flexes so the count inside it can wrap to a second line while the
+     * button stays 44px and square — giving it a percentage width instead would
+     * have made the `+` grow and shrink with the text next to it.
+     */
+    tileRow: {
       flexDirection: 'row',
-      flexWrap: 'wrap',
+      alignItems: 'center',
       gap: 8,
-      marginBottom: 12,
-    },
-    chip: {
-      paddingHorizontal: 14,
-      paddingVertical: 8,
-      borderRadius: 16,
-    },
-    chipText: {
-      fontSize: 14,
-      fontWeight: '600',
-    },
-    startButton: {
-      backgroundColor: c.primary,
-      borderRadius: 8,
-      paddingVertical: 12,
-      alignItems: 'center',
-      marginBottom: 12,
-    },
-    startButtonText: {
-      color: c.primaryText,
-      fontSize: 16,
-      fontWeight: '600',
-    },
-    progressBarContainer: {
-      flexDirection: 'row',
-      height: 10,
-      borderRadius: 5,
-      backgroundColor: c.progressTrack,
-      overflow: 'hidden',
       marginBottom: 16,
     },
-    progressBarFill: {
-      backgroundColor: c.primary,
-    },
-    progressBarEmpty: {
-      backgroundColor: c.progressTrack,
-    },
-    progressText: {
-      fontSize: 14,
-      fontWeight: '500',
-      marginBottom: 16,
-      textAlign: 'center',
-      color: c.textMuted,
-    },
-    list: {
+    /**
+     * The way into the task list.
+     *
+     * Styled as a row rather than a button so it reads as a panel rather than an
+     * action competing with the `+` beside it.
+     */
+    allTasksTile: {
       flex: 1,
-    },
-    todoItem: {
       flexDirection: 'row',
-      justifyContent: 'space-between',
       alignItems: 'center',
-      padding: 12,
+      justifyContent: 'space-between',
+      paddingVertical: 14,
+      paddingHorizontal: 12,
+      borderRadius: 10,
       backgroundColor: c.surface,
     },
-    todoText: {
-      fontSize: 16,
+    allTasksTextGroup: {
       flex: 1,
-      marginRight: 12,
+      gap: 2,
+    },
+    allTasksTitle: {
+      fontSize: 16,
+      fontWeight: '600',
       color: c.text,
     },
-    completedText: {
-      textDecorationLine: 'line-through',
-      color: c.textDisabled,
-    },
-    timerDisplay: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      marginTop: 4,
-      gap: 4,
-    },
-    timerText: {
-      fontSize: 14,
+    allTasksBody: {
+      fontSize: 13,
       color: c.textMuted,
-      fontVariant: ['tabular-nums'],
     },
-    actionContainer: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
-    },
-    actionButton: {
-      color: c.primary,
-      fontSize: 16,
-      marginHorizontal: 8,
-    },
-    taskTagsContainer: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      alignItems: 'center',
-      gap: 6,
-      marginTop: 6,
-    },
-    taskTagChip: {
-      borderRadius: 10,
-      borderWidth: 1,
-      paddingHorizontal: 8,
-      paddingVertical: 3,
-    },
-    taskTagText: {
-      fontSize: 12,
-      fontWeight: '600',
-    },
+    /**
+     * The tag index, between the two cards.
+     *
+     * A heading plus a right-aligned hint rather than a heading alone: chips in a
+     * row are exactly what the old, non-working filter looked like, and "Open one
+     * to see its tasks" is the one line that tells this apart from it.
+     */
     tagsSection: {
-      paddingBottom: 8,
+      marginBottom: 16,
+      marginTop: 4,
+      paddingVertical: 14,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+      backgroundColor: c.surface,
+    },
+    tagsHeadingRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      justifyContent: 'space-between',
+      gap: 8,
+      marginBottom: 10,
     },
     tagsHeader: {
       fontSize: 16,
-      fontWeight: '700',
-      marginBottom: 10,
+      fontWeight: '600',
       color: c.text,
+    },
+    tagsHint: {
+      fontSize: 12,
+      color: c.textMuted,
     },
     tagsChipRow: {
       flexDirection: 'row',
@@ -875,17 +924,14 @@ const createStyles = (t: Theme) => {
       gap: 8,
     },
     tagChip: {
-      paddingHorizontal: 10,
-      paddingVertical: 6,
       borderRadius: 12,
       borderWidth: 1,
-    },
-    tagChipSelected: {
-      transform: [{ scale: 1.05 }],
+      paddingHorizontal: 10,
+      paddingVertical: 6,
     },
     tagChipText: {
-      fontSize: 12,
-      fontWeight: '700',
+      fontSize: 13,
+      fontWeight: '600',
     },
     exportFooter: {
       borderTopWidth: 1,
@@ -905,14 +951,27 @@ const createStyles = (t: Theme) => {
       borderRadius: 10,
       backgroundColor: c.primary,
     },
+    /**
+     * Disabled state for the export bar.
+     *
+     * Was a hardcoded pair, `'#1C3A5E'` and `'#A5C9F5'`, neither of which existed
+     * anywhere else in the app. It is now `surfaceMuted`, which is what every other
+     * disabled surface in the design already uses, and the label moves to
+     * `textDisabled` to go with it — white on `surfaceMuted` is unreadable in light
+     * mode, so dimming the fill alone would have fixed the theming and left the
+     * contrast broken.
+     */
     exportButtonDisabled: {
-      backgroundColor: t.mode === 'dark' ? '#1C3A5E' : '#A5C9F5',
+      backgroundColor: c.surfaceMuted,
     },
     exportButtonText: {
       color: c.primaryText,
       fontSize: 14,
       fontWeight: '600',
       textAlign: 'center',
+    },
+    exportButtonTextDisabled: {
+      color: c.textDisabled,
     },
   });
 };
