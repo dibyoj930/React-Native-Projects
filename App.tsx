@@ -4,7 +4,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import WelcomeComponent, { type Screen } from './WelcomeComponent';
-import { NotificationProvider } from './notifications';
+import { NotificationProvider, useNotifications } from './notifications';
 import { ProductivityProvider } from './productivity';
 import { ThemeProvider } from './theme/ThemeProvider';
 import { useTheme } from './theme/useTheme';
@@ -60,6 +60,16 @@ function AppContent() {
   const t = useTheme();
   const styles = useMemo(() => createStyles(t), [t]);
   const [screen, setScreen] = useState<Screen>({ name: 'home' });
+  const { pressedTodoId, clearPressedTodo } = useNotifications();
+
+  // A tapped timer notification asks to see the task it was about, and the only
+  // place a task is shown is the list. The intent is consumed as it is honoured,
+  // so a later re-render cannot navigate a second time.
+  useEffect(() => {
+    if (!pressedTodoId) return;
+    setScreen({ name: 'tasks' });
+    clearPressedTodo();
+  }, [pressedTodoId, clearPressedTodo]);
 
   // Android's hardware back has to be handled explicitly: without this it exits
   // the app from either screen, skipping the one step back the user expects. The

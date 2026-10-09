@@ -11,7 +11,10 @@
 
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
+import notifee, { EventType } from '@notifee/react-native';
+
 import App from '../App';
+import { visibleText } from './support/render';
 
 test('mounts the full app tree', async () => {
   let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
@@ -27,6 +30,38 @@ test('mounts the full app tree', async () => {
 
   expect(renderer).toBeDefined();
   expect(renderer!.toJSON()).toBeTruthy();
+
+  await ReactTestRenderer.act(async () => {
+    renderer!.unmount();
+  });
+});
+
+test('opens the task list when a timer notification is tapped', async () => {
+  const onForegroundEvent = notifee.onForegroundEvent as unknown as jest.Mock;
+  onForegroundEvent.mockClear();
+
+  let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(<App />);
+  });
+  await ReactTestRenderer.act(async () => {
+    await Promise.resolve();
+  });
+
+  // The home screen is up first; the tap is what moves the app.
+  expect(visibleText(renderer!)).not.toContain('All tasks');
+
+  const handler = onForegroundEvent.mock.calls.at(-1)?.[0];
+  if (!handler) throw new Error('no foreground handler was registered');
+  await ReactTestRenderer.act(async () => {
+    handler({
+      type: EventType.PRESS,
+      detail: { notification: { data: { todoId: 'task-1' } } },
+    });
+  });
+
+  expect(visibleText(renderer!)).toContain('All tasks');
 
   await ReactTestRenderer.act(async () => {
     renderer!.unmount();

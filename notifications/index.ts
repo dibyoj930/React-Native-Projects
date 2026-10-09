@@ -1,6 +1,7 @@
 export {
   cancelTimerNotification,
   ensurePermission,
+  getInitialPressedTodoId,
   getPendingTimers,
   onForegroundEvent,
   registerBackgroundHandler,

@@ -4,6 +4,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { EventType, type Event } from '@notifee/react-native';
 import {
   ensurePermission,
+  getInitialPressedTodoId,
   onForegroundEvent,
   type PermissionState,
 } from './notificationService';
@@ -22,6 +23,16 @@ interface NotificationContextValue {
   requestPermission: () => Promise<PermissionState>;
   banner: BannerNotification | null;
   dismissBanner: () => void;
+  /**
+   * The task a tapped notification points at, waiting to be opened.
+   *
+   * A tap is an *intent*, not a place: this provider holds the id so the
+   * component that owns navigation can act on it and then clear it. Keeping it
+   * here rather than navigating directly lets the no-router `Screen` state stay
+   * the single owner of where the app is showing.
+   */
+  pressedTodoId: string | null;
+  clearPressedTodo: () => void;
 }
 
 const NotificationContext = React.createContext<NotificationContextValue | null>(null);
@@ -92,6 +103,7 @@ function NotificationBanner({
 export function NotificationProvider({ children }: { children: React.ReactNode }) {
   const [permission, setPermission] = useState<PermissionState>('undetermined');
   const [banner, setBanner] = useState<BannerNotification | null>(null);
+  const [pressedTodoId, setPressedTodoId] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -104,9 +116,31 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   }, []);
 
   useEffect(() => {
+    let active = true;
+    // A tap that launched the app from cold is delivered here, not as a
+    // foreground event — there was no JS running to receive it.
+    getInitialPressedTodoId().then((todoId) => {
+      if (active && todoId) setPressedTodoId(todoId);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
     const unsubscribe = onForegroundEvent((event: Event) => {
-      if (event.type !== EventType.DELIVERED) return;
       const { notification } = event.detail;
+
+      // A tap is a request to open the task the notification is about; a
+      // delivery is a heads-up that it fired. They are separate intents and are
+      // handled separately, so a tap never leaves a banner behind it.
+      if (event.type === EventType.PRESS) {
+        const todoId = notification?.data?.todoId;
+        if (typeof todoId === 'string') setPressedTodoId(todoId);
+        return;
+      }
+
+      if (event.type !== EventType.DELIVERED) return;
       if (!notification?.title) return;
 
       setBanner({
@@ -125,10 +159,18 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
   }, []);
 
   const dismissBanner = useCallback(() => setBanner(null), []);
+  const clearPressedTodo = useCallback(() => setPressedTodoId(null), []);
 
   const value = useMemo(
-    () => ({ permission, requestPermission, banner, dismissBanner }),
-    [permission, requestPermission, banner, dismissBanner],
+    () => ({
+      permission,
+      requestPermission,
+      banner,
+      dismissBanner,
+      pressedTodoId,
+      clearPressedTodo,
+    }),
+    [permission, requestPermission, banner, dismissBanner, pressedTodoId, clearPressedTodo],
   );
 
   return (

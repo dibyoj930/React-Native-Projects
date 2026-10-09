@@ -129,6 +129,24 @@ export function onForegroundEvent(handler: (event: Event) => void): () => void {
 }
 
 /**
+ * The task id from the notification that launched the app, if it was a tap.
+ *
+ * A press that starts the app from cold is not a foreground event — there is no
+ * JS running to receive one — so Notifee surfaces it on its own. Returns null
+ * for a normal launch, or a notification that carries no task.
+ */
+export async function getInitialPressedTodoId(): Promise<string | null> {
+  try {
+    const initial = await notifee.getInitialNotification();
+    const todoId = initial?.notification?.data?.todoId;
+    return typeof todoId === 'string' ? todoId : null;
+  } catch (error) {
+    console.warn('[notifications] getInitialNotification failed:', error);
+    return null;
+  }
+}
+
+/**
  * Must be registered from the app entry file so the headless JS task exists.
  * See `index.js`.
  */
