@@ -161,6 +161,27 @@ describe('productivityReducer', () => {
     expect(next.sessions).toEqual([]);
   });
 
+  it('resets to a clean, hydrated slate', () => {
+    const seeded: ProductivityState = {
+      ...initialProductivityState,
+      hydrated: true,
+      sessions: [closeSession(startSession('s1', 't', T0), 'completed', T0 + MINUTE)],
+      active: { t: startSession('s2', 't', T0) },
+      ledger: { freezesEarned: 3, freezesSpent: 1 },
+      memory: { lastEventAt: T0, previousDayScore: 55 },
+    };
+
+    const next = productivityReducer(seeded, { type: 'reset' });
+
+    expect(next.sessions).toEqual([]);
+    expect(next.active).toEqual({});
+    expect(next.ledger).toEqual({ freezesEarned: 0, freezesSpent: 0 });
+    expect(next.memory).toEqual({ lastEventAt: null, previousDayScore: 0 });
+    // Still hydrated: a reset is a deliberate empty, not a fresh install, so the
+    // save effect persists it rather than hydration running again.
+    expect(next.hydrated).toBe(true);
+  });
+
   it('ignores an unknown action rather than corrupting state', () => {
     const next = productivityReducer(initialProductivityState, {
       type: 'nope',

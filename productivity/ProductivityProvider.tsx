@@ -21,7 +21,7 @@ import {
   productivityReducer,
 } from './reducer';
 import { closeSession, nextSessionId, pauseSession, resumeSession, startSession } from './sessions';
-import { loadProductivity, saveProductivity } from './storage';
+import { loadProductivity, saveProductivity, clearProductivity } from './storage';
 import type { ActiveSession, CompletionRecord, FocusSessionStatus } from './types';
 
 /**
@@ -55,6 +55,11 @@ interface ProductivityContextValue {
   noteActivity: () => void;
   /** Focus history for one task. Always returns a value, even with no history. */
   attributionFor: (taskId: string) => Attribution;
+  /**
+   * Wipes the focus log, streak ledger and momentum memory, in memory and on
+   * disk. Tasks live under their own key and are untouched.
+   */
+  resetProductivity: () => void;
 }
 
 const ProductivityContext = React.createContext<ProductivityContextValue | null>(null);
@@ -242,6 +247,18 @@ export function ProductivityProvider({ children }: { children: React.ReactNode }
     dispatch({ type: 'noteEvent', at: Date.now() });
   }, []);
 
+  /**
+   * Clears the history on disk first, then in memory.
+   *
+   * The stored document is removed immediately, so killing the app inside the
+   * debounced save window cannot resurrect the history the user just deleted;
+   * the reset dispatch then empties the in-memory copy the UI reads.
+   */
+  const resetProductivity = useCallback(() => {
+    clearProductivity();
+    dispatch({ type: 'reset' });
+  }, []);
+
   const attributionFor = useCallback(
     (taskId: string): Attribution =>
       snapshot.attribution.get(taskId) ?? {
@@ -266,6 +283,7 @@ export function ProductivityProvider({ children }: { children: React.ReactNode }
       finishFocus,
       noteActivity,
       attributionFor,
+      resetProductivity,
     }),
     [
       snapshot,
@@ -276,6 +294,7 @@ export function ProductivityProvider({ children }: { children: React.ReactNode }
       finishFocus,
       noteActivity,
       attributionFor,
+      resetProductivity,
     ],
   );
 

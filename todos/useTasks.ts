@@ -70,6 +70,17 @@ export function useTasks() {
   }, []);
 
   /**
+   * Empties the list.
+   *
+   * Same contract as `removeTodo`, applied to every task: what each one owed the
+   * timer and the session log is settled by the caller before this runs. Kept as
+   * one state write so a full reset is a single re-render, not one per task.
+   */
+  const clearTasks = useCallback(() => {
+    setTodos([]);
+  }, []);
+
+  /**
    * Completes several tasks at one instant — the expiry path, where every task
    * a timer was attached to finishes together and must share one timestamp.
    *
@@ -115,6 +126,7 @@ export function useTasks() {
     createTodo,
     updateTodo,
     removeTodo,
+    clearTasks,
     completeTodos,
     setCompleted,
   };

@@ -50,7 +50,8 @@ export type ProductivityAction =
   | { type: 'closeFocus'; taskId: string; session: FocusSession; at: number }
   | { type: 'noteEvent'; at: number }
   | { type: 'setLedger'; ledger: StreakLedger }
-  | { type: 'setMemory'; memory: MomentumMemory };
+  | { type: 'setMemory'; memory: MomentumMemory }
+  | { type: 'reset' };
 
 export function productivityReducer(
   state: ProductivityState,
@@ -100,6 +101,12 @@ export function productivityReducer(
 
     case 'setMemory':
       return { ...state, memory: action.memory };
+
+    case 'reset':
+      // Wipes the log, ledger and memory but stays hydrated, so the save effect
+      // persists the empty state rather than the provider trying to hydrate
+      // again — a reset is a deliberate empty, not a fresh install.
+      return { ...initialProductivityState, hydrated: true };
 
     default:
       return state;

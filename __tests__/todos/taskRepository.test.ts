@@ -103,10 +103,13 @@ describe('buildExportPayload', () => {
 });
 
 describe('exportFilename', () => {
-  it('names the file after the day of the export', () => {
+  it('names the file after the local day, not the UTC one', () => {
+    // 18:30Z is already midnight the next day in IST (the suite's pinned zone).
+    // Slicing the UTC string would name the file `2026-05-03`; the local day is
+    // `2026-05-04`, and that is the day the user would call it.
     jest.useFakeTimers({ now: new Date('2026-05-03T18:30:00.000Z') });
     const payload = buildExportPayload([todo], snapshot());
-    expect(exportFilename(payload)).toBe('todos-2026-05-03.json');
+    expect(exportFilename(payload)).toBe('todos-2026-05-04.json');
     jest.useRealTimers();
   });
 });

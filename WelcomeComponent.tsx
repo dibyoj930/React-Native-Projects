@@ -5,8 +5,10 @@ import { TimerPickerModal } from 'react-native-timer-picker';
 import { AddTodoModal } from './components/AddTodoModal';
 import { AllTasksScreen } from './components/AllTasksScreen';
 import { HomeScreen } from './components/HomeScreen';
+import { SettingsScreen } from './components/SettingsScreen';
 import { TodoRow } from './components/TodoRow';
 import type { TimerState } from './hooks/useFocusTimer';
+import { useSettings } from './hooks/useSettings';
 import { useTaskScreen } from './hooks/useTaskScreen';
 import type { Todo } from './todos/model';
 import { useTheme } from './theme/useTheme';
@@ -43,7 +45,8 @@ const DEFAULT_FOCUS_MINUTES = 25;
 export type Screen =
   | { name: 'home' }
   | { name: 'tasks' }
-  | { name: 'tag'; tag: string };
+  | { name: 'tag'; tag: string }
+  | { name: 'settings' };
 
 export type WelcomeComponentProps = {
   /** Which screen to show. The union is on the `Screen` type above. */
@@ -88,7 +91,16 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
     submitTask,
     exportTodos,
     rowPropsFor,
+    clearAllTasks,
   } = useTaskScreen();
+
+  // Settings reaches across four domains; its controller owns the confirmations
+  // and the actions they gate. The task-list cleanup is passed in from the
+  // controller above, so both read the one list rather than each keeping a copy.
+  const settings = useSettings({
+    taskCount: todos.length,
+    onClearTasks: clearAllTasks,
+  });
 
   // The one renderer both lists share. It is a one-liner here rather than in the
   // controller because it is JSX: the controller answers "what are this row's
@@ -134,6 +146,26 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
     </>
   );
 
+  // Settings is its own destination, back to home, and shares none of the task
+  // list. It is a full screen for the same reason the list is: it has somewhere
+  // to return to and its own header.
+  if (screen.name === 'settings') {
+    return (
+      <View style={styles.screen}>
+        <SettingsScreen
+          notificationPermission={settings.notificationPermission}
+          onBack={() => onNavigate({ name: 'home' })}
+          onClearProductivity={settings.confirmClearProductivity}
+          onClearTasks={settings.confirmClearTasks}
+          onRequestNotifications={settings.requestNotifications}
+          onSetPreference={settings.setPreference}
+          preference={settings.preference}
+          taskCount={settings.taskCount}
+        />
+      </View>
+    );
+  }
+
   if (screen.name !== 'home') {
     // A full screen swap rather than a `Modal`. It is the app's only task list, so
     // it is a destination with somewhere to come back to, not a layer over the
@@ -166,6 +198,7 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
         notificationsBlocked={notificationsBlocked}
         onAddTask={openCreate}
         onExport={exportTodos}
+        onOpenSettings={() => onNavigate({ name: 'settings' })}
         onOpenTag={(tag) => onNavigate({ name: 'tag', tag })}
         onOpenTasks={() => onNavigate({ name: 'tasks' })}
         todos={todos}

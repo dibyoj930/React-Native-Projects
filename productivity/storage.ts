@@ -80,11 +80,12 @@ export async function saveProductivity(state: ProductivityState): Promise<void> 
 }
 
 /**
- * Wipes the focus log and the ledger.
+ * Wipes the stored focus log, ledger and memory.
  *
- * Not currently called from the UI — there is no reset control yet. It lives
- * here rather than being written when one is added, because a data-deletion
- * path that has never been executed is a data-deletion path that does not work.
+ * Called by the provider's reset, which removes the stored document and then
+ * empties the in-memory copy — removing first means a kill inside the debounced
+ * save window cannot resurrect history the user just deleted. Keeping the two
+ * together is why a data-deletion path is tested rather than merely written.
  *
  * The tasks themselves live under a separate key and are untouched: clearing
  * productivity history should not delete anyone's to-do list.

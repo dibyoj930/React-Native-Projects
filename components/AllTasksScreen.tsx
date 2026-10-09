@@ -9,6 +9,7 @@ import {
 import MaterialCommunityIcons from '@react-native-vector-icons/material-design-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Todo } from '../todos/model';
+import { filterByTag, openCount } from '../todos/taskSelectors';
 import { useTheme } from '../theme/useTheme';
 import type { Theme } from '../theme/theme';
 
@@ -78,15 +79,12 @@ export function AllTasksScreen({
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(t), [t]);
 
-  const shown = useMemo(
-    () => (filterTag ? todos.filter((todo) => todo.tags?.includes(filterTag)) : todos),
-    [filterTag, todos],
-  );
+  const shown = useMemo(() => filterByTag(todos, filterTag), [filterTag, todos]);
 
   // Counted here rather than passed in: it is one pass over an array already in
   // memory, and a `total`/`open` prop pair is a chance for the caller to disagree
   // with the data it is describing.
-  const open = shown.filter((todo) => !todo.completed).length;
+  const open = openCount(shown);
 
   const subtitle =
     shown.length === 0

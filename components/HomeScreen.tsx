@@ -26,6 +26,7 @@ import { ProductivityDashboard } from './ProductivityDashboard';
 import { TodayCard } from './TodayCard';
 import type { Todo } from '../todos/model';
 import { AVAILABLE_TAGS, tintOf } from '../todos/tags';
+import { openCount } from '../todos/taskSelectors';
 import { useTheme } from '../theme/useTheme';
 import type { Theme } from '../theme/theme';
 
@@ -44,6 +45,8 @@ export type HomeScreenProps = {
   onOpenTag: (tag: string) => void;
   /** Opens the create sheet. */
   onAddTask: () => void;
+  /** Opens the settings screen. */
+  onOpenSettings: () => void;
   /** Shares the list as JSON. No-op when there is nothing to export. */
   onExport: () => void;
 };
@@ -54,6 +57,7 @@ export function HomeScreen({
   onOpenTasks,
   onOpenTag,
   onAddTask,
+  onOpenSettings,
   onExport,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
@@ -63,7 +67,7 @@ export function HomeScreen({
   // when the system colour scheme actually flips.
   const styles = useMemo(() => createStyles(t), [t]);
 
-  const openCount = todos.filter((todo) => !todo.completed).length;
+  const open = openCount(todos);
 
   return (
     <>
@@ -75,6 +79,19 @@ export function HomeScreen({
       >
         <View style={styles.headerRow}>
           <Text style={styles.title}>Today</Text>
+          <TouchableOpacity
+            accessibilityLabel="Open settings"
+            accessibilityRole="button"
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            onPress={onOpenSettings}
+            style={styles.settingsButton}
+          >
+            <MaterialCommunityIcons
+              color={t.colors.textMuted}
+              name="cog-outline"
+              size={24}
+            />
+          </TouchableOpacity>
         </View>
 
         {notificationsBlocked && (
@@ -103,9 +120,9 @@ export function HomeScreen({
               <Text style={styles.allTasksTitle}>
                 {todos.length === 0
                   ? 'Add your first task'
-                  : openCount === 0
+                  : open === 0
                     ? `All ${todos.length} done`
-                    : `${openCount} open of ${todos.length}`}
+                    : `${open} open of ${todos.length}`}
               </Text>
               <Text style={styles.allTasksBody}>See every task you have written down.</Text>
             </View>
@@ -187,6 +204,9 @@ export function HomeScreen({
         ]}
       >
         <TouchableOpacity
+          accessibilityLabel="Export tasks"
+          accessibilityRole="button"
+          accessibilityState={{ disabled: todos.length === 0 }}
           style={[
             styles.exportButton,
             todos.length === 0 && styles.exportButtonDisabled,
@@ -241,6 +261,18 @@ const createStyles = (t: Theme) => {
       fontSize: 24,
       fontWeight: 'bold',
       color: c.text,
+    },
+    /**
+     * The gear that opens settings.
+     *
+     * Fixed 40×40 so it is a comfortable target regardless of the icon's own
+     * size, matching the back control on the other screens.
+     */
+    settingsButton: {
+      width: 40,
+      height: 40,
+      alignItems: 'flex-end',
+      justifyContent: 'center',
     },
     permissionBanner: {
       backgroundColor: c.warningSurface,

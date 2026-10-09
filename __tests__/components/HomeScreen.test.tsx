@@ -17,7 +17,7 @@ import ReactTestRenderer from 'react-test-renderer';
 import { HomeScreen, type HomeScreenProps } from '../../components/HomeScreen';
 import { ProductivityProvider } from '../../productivity';
 import type { Todo } from '../../todos/model';
-import { press, visibleText, withRendered } from '../support/render';
+import { byLabel, labels, press, visibleText, withRendered } from '../support/render';
 
 function todo(overrides: Partial<Todo> & { id: string }): Todo {
   return {
@@ -36,6 +36,7 @@ function props(overrides: Partial<HomeScreenProps> = {}): HomeScreenProps {
     onOpenTasks: () => {},
     onOpenTag: () => {},
     onAddTask: () => {},
+    onOpenSettings: () => {},
     onExport: () => {},
     ...overrides,
   };
@@ -52,28 +53,20 @@ function screen(overrides: Partial<HomeScreenProps> = {}) {
 /**
  * The export button.
  *
- * It carries no accessibility label, so unlike every other control here it
- * cannot be reached by pressing a label — it is found by its own text, then by
- * walking up to the ancestor holding the press handler.
+ * Located by its accessibility label, then walked up to the node carrying the
+ * press handler, so callers can reach both the handler and the composite's
+ * `style` and `accessibilityState` props.
  */
 function exportButton(
   renderer: ReactTestRenderer.ReactTestRenderer,
 ): ReactTestRenderer.ReactTestInstance {
-  const texts = renderer.root.findAll(
-    (node) =>
-      Array.isArray(node.props.children) &&
-      typeof node.props.children[0] === 'string' &&
-      (node.props.children[0] as string).startsWith('Download / Export'),
-  );
-  if (texts.length === 0) {
-    throw new Error('no export button found');
-  }
-  let cursor: ReactTestRenderer.ReactTestInstance | null = texts[0].parent;
+  const host = byLabel(renderer, 'Export tasks');
+  let cursor: ReactTestRenderer.ReactTestInstance | null = host;
   while (cursor) {
     if (typeof cursor.props?.onPress === 'function') return cursor;
     cursor = cursor.parent;
   }
-  throw new Error('the export text has no pressable ancestor');
+  throw new Error('the export button has no pressable ancestor');
 }
 
 describe('HomeScreen — the counts', () => {
@@ -144,6 +137,14 @@ describe('HomeScreen — what it reports back', () => {
     });
   });
 
+  it('reports the gear as a request for settings', async () => {
+    const onOpenSettings = jest.fn();
+    await withRendered(screen({ onOpenSettings }), async (renderer) => {
+      await press(renderer, 'Open settings');
+      expect(onOpenSettings).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('reports a tag chip as that tag, not as a filter it applies itself', async () => {
     const onOpenTag = jest.fn();
     await withRendered(screen({ onOpenTag }), async (renderer) => {
@@ -171,6 +172,22 @@ describe('HomeScreen — what it reports back', () => {
     });
     await withRendered(screen(), (renderer) => {
       expect(exportButton(renderer).props.style[1]).not.toBe(false);
+    });
+  });
+
+  it('labels the export button and reports whether it is enabled', async () => {
+    // A labelled control is reachable by assistive tech; the state tells it the
+    // button is inert when the list is empty.
+    await withRendered(screen({ todos: [todo({ id: 'a' })] }), (renderer) => {
+      expect(labels(renderer)).toContain('Export tasks');
+      expect(exportButton(renderer).props.accessibilityState).toEqual({
+        disabled: false,
+      });
+    });
+    await withRendered(screen(), (renderer) => {
+      expect(exportButton(renderer).props.accessibilityState).toEqual({
+        disabled: true,
+      });
     });
   });
 });

@@ -6,8 +6,8 @@ import type { DayKey } from './types';
  * Every day boundary in this app is *local*. `toISOString()` is deliberately
  * absent from this file: it converts to UTC, so a task completed at 9pm in
  * IST (UTC+5:30) lands on the previous day key and silently corrupts daily
- * rollups, streaks and the momentum graph. That exact bug already exists in
- * `exportTodos`, which uses `exportedAt.slice(0, 10)` for its filename.
+ * rollups, streaks and the momentum graph. `exportFilename` once had that
+ * exact bug — `exportedAt.slice(0, 10)` — and now derives its day here instead.
  *
  * Keys are `YYYY-MM-DD`, which sorts lexicographically in chronological order —
  * so plain string comparison is a valid date comparison.

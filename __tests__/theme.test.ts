@@ -34,6 +34,7 @@ const THEMED_SOURCES = [
   join('components', 'HomeScreen.tsx'),
   join('components', 'TodayCard.tsx'),
   join('components', 'ProductivityDashboard.tsx'),
+  join('components', 'SettingsScreen.tsx'),
 ];
 
 /**
@@ -123,7 +124,7 @@ describe('theme discipline', () => {
     // and named here.
     const known = [
       'TodoRow', 'AllTasksScreen', 'AddTodoModal', 'HomeScreen', 'TodayCard',
-      'ProductivityDashboard',
+      'ProductivityDashboard', 'SettingsScreen',
     ];
     expect(THEMED_SOURCES.filter((p) => p.startsWith('components'))).toHaveLength(
       known.length,

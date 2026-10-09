@@ -58,13 +58,23 @@ export type TaskScreen = {
   exportTodos: () => Promise<void>;
   /** The props for one task row, wired to this controller's handlers. */
   rowPropsFor: (todo: Todo) => TodoRowProps;
+  /** Empties the list, settling every task's timer and session first. */
+  clearAllTasks: () => void;
 };
 
 export function useTaskScreen(): TaskScreen {
   // Owning the list — state, load/save, create/edit/delete and the two
   // completion writes — is `todos/useTasks`'s job. What stays here are the rules
   // that need *both* sides: a timer and a task, a session log and a task.
-  const { todos, createTodo, updateTodo, removeTodo, completeTodos, setCompleted } = useTasks();
+  const {
+    todos,
+    createTodo,
+    updateTodo,
+    removeTodo,
+    clearTasks,
+    completeTodos,
+    setCompleted,
+  } = useTasks();
   // The notification layer already asks the OS for permission on mount — above
   // this hook, in `NotificationProvider` — and owns the answer. Keeping a second
   // copy here meant two identical requests and two states for one fact.
@@ -181,6 +191,24 @@ export function useTaskScreen(): TaskScreen {
     },
     [clearTimer, finishFocus, removeTodo],
   );
+
+  /**
+   * Empties the list and settles what every task owed the other domains.
+   *
+   * The per-task cleanup `deleteTodo` performs, applied to all of them at once:
+   * each pending notification is cancelled and each timer and session closed
+   * before the tasks leave. It lives here because this is the one place holding
+   * the list, the timers and the session log together.
+   */
+  const clearAllTasks = useCallback(() => {
+    for (const todo of todos) {
+      cancelTimerNotification(todo.id);
+      clearTimer(todo.id);
+      finishFocus(todo.id, 'stopped');
+    }
+    clearTasks();
+    noteActivity();
+  }, [clearTasks, clearTimer, finishFocus, noteActivity, todos]);
 
   /**
    * Moves one task's completion, once the guards allow it.
@@ -364,5 +392,6 @@ export function useTaskScreen(): TaskScreen {
     submitTask,
     exportTodos,
     rowPropsFor,
+    clearAllTasks,
   };
 }

@@ -59,12 +59,3 @@ export function createTodoFromDraft(draft: TodoDraft, id: string, ctx: TaskConte
     dueDate: draft.dueDate,
   };
 }
-
-export function toggleCompleteTodo(todo: Todo, ctx: TaskContext): Todo {
-  const nowCompleted = !todo.completed;
-  return {
-    ...todo,
-    completed: nowCompleted,
-    completedAt: nowCompleted ? ctx.now() : undefined,
-  };
-}

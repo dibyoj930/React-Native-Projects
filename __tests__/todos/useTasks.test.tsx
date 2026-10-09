@@ -155,6 +155,22 @@ describe('useTasks — the operations', () => {
     expect(tasks!.todos.map((todo) => todo.text)).toEqual(['Two']);
   });
 
+  it('clears the whole list in one write', async () => {
+    await ReactTestRenderer.act(async () => {
+      tasks!.createTodo({ text: 'One' });
+      tasks!.createTodo({ text: 'Two' });
+    });
+
+    await ReactTestRenderer.act(async () => {
+      tasks!.clearTasks();
+    });
+
+    expect(tasks!.todos).toEqual([]);
+    // Persisted empty by the effect, not by the operation.
+    const saved = JSON.parse(writes().at(-1) as string) as Todo[];
+    expect(saved).toEqual([]);
+  });
+
   it('completes several tasks at one instant, leaving completed ones alone', async () => {
     await ReactTestRenderer.act(async () => {
       tasks!.createTodo({ text: 'One' });

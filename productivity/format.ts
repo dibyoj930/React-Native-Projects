@@ -54,8 +54,8 @@ export function progressRatio(value: number, goal: number): number {
  * Spelled out rather than pulled from `Date`, because `Date` would need a
  * timezone to interpret a `YYYY-MM-DD` day key and this layer has no business
  * having one. `new Date('2025-03-06')` parses as UTC midnight, which in any
- * negative-offset zone is the *previous* local day — a bug already documented
- * in `exportTodos`, which has the same mistake and is still unfixed.
+ * negative-offset zone is the *previous* local day — the very mistake
+ * `exportFilename` used to make before it went through `localDateKey`.
  */
 const MONTHS = [
   'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',

@@ -5,7 +5,11 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { migrateTodos, TODOS_STORAGE_KEY, type Todo } from './model';
 import { completedCount } from './taskSelectors';
-import type { MissionGoal, ProductivitySnapshot } from '../productivity';
+import {
+  localDateKey,
+  type MissionGoal,
+  type ProductivitySnapshot,
+} from '../productivity';
 
 export async function loadTodos(): Promise<Todo[]> {
   try {
@@ -109,6 +113,15 @@ export function buildExportPayload(todos: Todo[], snapshot: ProductivitySnapshot
   };
 }
 
+/**
+ * The export file's name, dated by the *local* day.
+ *
+ * `exportedAt` is a UTC ISO string, so slicing its first ten characters names
+ * the file after the UTC day — which is the previous day for any evening export
+ * east of UTC (an 18:30Z export is already the next day in IST). The bug this
+ * fixes is the one `dateKey.ts` was written to prevent, so the day key is
+ * derived the same way as every other day boundary in the app.
+ */
 export function exportFilename(payload: ExportPayload): string {
-  return `todos-${payload.exportedAt.slice(0, 10)}.json`;
+  return `todos-${localDateKey(Date.parse(payload.exportedAt))}.json`;
 }

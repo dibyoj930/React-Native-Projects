@@ -156,3 +156,24 @@ describe('useTaskScreen — export', () => {
     expect(content.message).toContain('Ship the release');
   });
 });
+
+describe('useTaskScreen — clearing everything', () => {
+  beforeEach(async () => {
+    await render(controllerTree());
+    await settle();
+  });
+
+  it('empties the list and forgets every task’s timer', async () => {
+    const todo = await focusedTask();
+    await act(() => api!.openCreate());
+    await act(() => api!.submitTask({ text: 'Second' }));
+    expect(api!.todos).toHaveLength(2);
+
+    await act(() => api!.clearAllTasks());
+
+    expect(api!.todos).toHaveLength(0);
+    // The per-task cleanup ran before the list emptied: the focused task's row no
+    // longer believes a timer is attached.
+    expect(api!.rowPropsFor(todo).hasTimer).toBe(false);
+  });
+});
