@@ -1,19 +1,24 @@
 /**
  * The timer, its picker and the row controls around them.
  *
- * `useFocusTimer` is the engine underneath and stays untouched: it owns the
- * countdown, the expiry tick and the "running" definition. This hook owns the
- * wiring around it — which task the picker is open for, which notification is
- * armed for which end time, the format a row prints — and takes the five things
- * it cannot know as callbacks: what a start, a pause, a resume, a stop and an
- * expiry each mean for the task and the session log. Those belong to whoever
- * holds both the timer and the productivity layer, which is the container.
+ * `useFocusTimer` is the engine underneath: it owns the countdown, the expiry
+ * tick and the "running" definition. This hook owns the wiring around it — which
+ * task the picker is open for, which notification is armed for which end time,
+ * re-adopting the timers the OS still holds after a relaunch, and the format a
+ * row prints — and takes the five things it cannot know as callbacks: what a
+ * start, a pause, a resume, a stop and an expiry each mean for the task and the
+ * session log. Those belong to whoever holds both the timer and the productivity
+ * layer, which is the container.
  */
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useFocusTimer, type TimerState } from './useFocusTimer';
 import type { FocusSessionStatus } from '../productivity';
-import { syncTimerNotification, cancelTimerNotification } from '../notifications';
+import {
+  cancelTimerNotification,
+  getPendingTimers,
+  syncTimerNotification,
+} from '../notifications';
 
 export type TimerOrchestrationDeps = {
   onTimerExpired: (ids: string[]) => void;
@@ -39,9 +44,40 @@ export function useTimerOrchestration(deps: TimerOrchestrationDeps) {
     start: startTimer,
     pause: pauseTimer,
     resume: resumeTimer,
+    restore: restoreTimer,
     clearTimer,
     remainingSecondsFor,
   } = useFocusTimer({ onExpire: onTimerExpired });
+
+  /**
+   * Re-adopts the timers the OS is still counting down.
+   *
+   * A timer's trigger lives natively, so it is the one piece of timer state that
+   * survives a relaunch; a paused timer has no pending trigger and is therefore
+   * deliberately not restored. A pending end time still in the future becomes a
+   * running timer again. One already in the past is reported as an expiry,
+   * exactly as if it had run out during this session — the container decides
+   * what that means for the task and the log.
+   */
+  const restoreTimers = useCallback(async () => {
+    const pending = await getPendingTimers();
+    const expired: string[] = [];
+    for (const { taskId, fireAt } of pending) {
+      if (!restoreTimer(taskId, fireAt)) expired.push(taskId);
+    }
+    if (expired.length > 0) onTimerExpired(expired);
+  }, [onTimerExpired, restoreTimer]);
+
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    // Once per mount: re-running would re-adopt the same pending triggers and,
+    // on the expiry path, hand the same ids to the container a second time.
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    restoreTimers().catch((error) => {
+      console.warn('[timer] restore failed:', error);
+    });
+  }, [restoreTimers]);
 
   const openTimerPicker = useCallback((id: string) => {
     setPickerTargetId(id);
@@ -142,6 +178,7 @@ export function useTimerOrchestration(deps: TimerOrchestrationDeps) {
     isRunning,
     remainingSecondsFor,
     formatTimeForTodo,
+    restoreTimers,
     clearTimer,
   };
 }

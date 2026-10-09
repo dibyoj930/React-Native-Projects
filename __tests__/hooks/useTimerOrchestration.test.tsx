@@ -12,6 +12,7 @@
 
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
+import notifee from '@notifee/react-native';
 
 import {
   useTimerOrchestration,
@@ -24,6 +25,21 @@ type Orchestration = ReturnType<typeof useTimerOrchestration>;
 let api: Orchestration | undefined;
 let deps: jest.Mocked<TimerOrchestrationDeps>;
 
+const getTriggerNotifications = notifee.getTriggerNotifications as unknown as jest.Mock;
+
+/** A pending timer trigger, as `getPendingTimers` reads it back from the OS. */
+function pendingTimer(todoId: string, fireAt: number) {
+  return { notification: { data: { todoId } }, trigger: { timestamp: fireAt } };
+}
+
+/** Mounts the probe, letting the mount-time restore read from the OS mock. */
+async function mount() {
+  await ReactTestRenderer.act(async () => {
+    ReactTestRenderer.create(<Probe />);
+  });
+  await ReactTestRenderer.act(async () => undefined);
+}
+
 /** Reads the hook's return value on every render, so tests act on the live one. */
 function Probe() {
   api = useTimerOrchestration(deps);
@@ -35,6 +51,9 @@ const act = (body: () => void) => ReactTestRenderer.act(body);
 beforeEach(() => {
   jest.useFakeTimers();
   api = undefined;
+  // No timers pending unless a test says so.
+  getTriggerNotifications.mockReset();
+  getTriggerNotifications.mockResolvedValue([]);
   deps = {
     onTimerExpired: jest.fn(),
     onStartFocus: jest.fn(),
@@ -171,5 +190,52 @@ describe('useTimerOrchestration — stopping and expiry', () => {
     expect(deps.onTimerExpired).toHaveBeenCalledTimes(1);
     expect(deps.onTimerExpired).toHaveBeenCalledWith(['task-1']);
     expect(api!.hasTimer('task-1')).toBe(false);
+  });
+});
+
+describe('useTimerOrchestration — restoring from the OS', () => {
+  it('re-adopts a timer whose notification is still pending', async () => {
+    getTriggerNotifications.mockResolvedValueOnce([
+      pendingTimer('task-1', Date.now() + 60_000),
+    ]);
+
+    await mount();
+
+    expect(api!.hasTimer('task-1')).toBe(true);
+    expect(api!.isRunning('task-1')).toBe(true);
+    expect(api!.formatTimeForTodo('task-1')).toBe('00:01:00');
+    // Re-adopting is not a fresh start: the session was opened before the restart
+    // and re-opening it here would double-count the focus.
+    expect(deps.onStartFocus).not.toHaveBeenCalled();
+  });
+
+  it('reports a pending timer whose end time has already passed as an expiry', async () => {
+    getTriggerNotifications.mockResolvedValueOnce([
+      pendingTimer('task-1', Date.now() - 1_000),
+    ]);
+
+    await mount();
+
+    expect(deps.onTimerExpired).toHaveBeenCalledWith(['task-1']);
+    expect(api!.hasTimer('task-1')).toBe(false);
+  });
+
+  it('restores only once, even if the hook re-renders', async () => {
+    getTriggerNotifications.mockResolvedValue([
+      pendingTimer('task-1', Date.now() + 60_000),
+    ]);
+
+    await mount();
+
+    // The query is made once per mount; a re-render must not re-adopt the same
+    // trigger and re-open a session (or re-fire an expiry) for it.
+    expect(getTriggerNotifications).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows nothing when the OS holds no pending timer', async () => {
+    await mount();
+
+    expect(api!.hasTimer('task-1')).toBe(false);
+    expect(deps.onTimerExpired).not.toHaveBeenCalled();
   });
 });

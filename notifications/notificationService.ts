@@ -90,6 +90,39 @@ export async function syncTimerNotification(input: TimerNotificationInput): Prom
   await scheduleTimerNotification(input);
 }
 
+/** A timer the OS is still counting down, and when it will fire. */
+export type PendingTimer = {
+  /** The task the timer belongs to; timers are keyed by task id. */
+  taskId: string;
+  /** Epoch ms the OS will deliver the notification. */
+  fireAt: number;
+};
+
+/**
+ * The timer notifications the OS still holds.
+ *
+ * The native trigger is the only part of a timer that outlives the JS context,
+ * so it — not a second store — is what a relaunch restores from. Notifee drops
+ * one-shot timestamp triggers as they fire, so an entry here is a timer that has
+ * not run out yet; an end time already in the past is handled defensively by the
+ * caller rather than living here.
+ */
+export async function getPendingTimers(): Promise<PendingTimer[]> {
+  try {
+    const triggers = await notifee.getTriggerNotifications();
+    return triggers.flatMap((entry) => {
+      const { notification, trigger } = entry;
+      const taskId = notification.data?.todoId;
+      const fireAt = (trigger as { timestamp?: number }).timestamp;
+      if (typeof taskId !== 'string' || typeof fireAt !== 'number') return [];
+      return [{ taskId, fireAt }];
+    });
+  } catch (error) {
+    console.warn('[notifications] getPendingTimers failed:', error);
+    return [];
+  }
+}
+
 /** Fires while the app is in the foreground. Returns an unsubscribe function. */
 export function onForegroundEvent(handler: (event: Event) => void): () => void {
   return notifee.onForegroundEvent(handler);

@@ -133,6 +133,36 @@ export function useFocusTimer({ onExpire }: UseFocusTimerOptions) {
   );
 
   /**
+   * Re-adopts a running timer from an absolute end time.
+   *
+   * Only the end time survives a relaunch — it lives in the OS trigger, so the
+   * duration the picker originally received is gone. A seed is derived from the
+   * time left, which is all the countdown and a later pause need. Returns false
+   * when the end time has already passed, so the caller can treat it as an
+   * expiry rather than a live timer; nothing is committed in that case.
+   */
+  const restore = useCallback(
+    (id: string, endAt: number): boolean => {
+      if (endAt <= Date.now()) return false;
+
+      const total = Math.max(0, Math.ceil((endAt - Date.now()) / 1000));
+      const seed = {
+        hours: Math.floor(total / 3600),
+        minutes: Math.floor((total % 3600) / 60),
+        seconds: total % 60,
+      } as TimerState;
+
+      reportedRef.current.delete(id);
+      commit(
+        { ...timersRef.current, [id]: seed },
+        { ...endsRef.current, [id]: endAt },
+      );
+      return true;
+    },
+    [commit],
+  );
+
+  /**
    * Reports every timer whose end time has passed and removes it.
    *
    * This runs on the 1s tick *and* on foreground. The foreground pass is the
@@ -209,6 +239,7 @@ export function useFocusTimer({ onExpire }: UseFocusTimerOptions) {
     start,
     pause,
     resume,
+    restore,
     clearTimer,
     remainingSecondsFor,
     hasTimer,
