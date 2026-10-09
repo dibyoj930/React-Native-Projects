@@ -1,24 +1,14 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-  Alert,
-  Share,
-  StyleSheet,
-  View,
-} from 'react-native';
+import React, { useMemo } from 'react';
+import { StyleSheet, View } from 'react-native';
 import { TimerPickerModal } from 'react-native-timer-picker';
-import { cancelTimerNotification, useNotifications } from './notifications';
-import { TodoRow } from './components/TodoRow';
+
+import { AddTodoModal } from './components/AddTodoModal';
 import { AllTasksScreen } from './components/AllTasksScreen';
-import { AddTodoModal, type TodoDraft } from './components/AddTodoModal';
 import { HomeScreen } from './components/HomeScreen';
+import { TodoRow } from './components/TodoRow';
 import type { TimerState } from './hooks/useFocusTimer';
-import { useTimerOrchestration } from './hooks/useTimerOrchestration';
-import { useProductivity, formatDueLabel, todayKey } from './productivity';
-import { type Todo } from './todos/model';
-import { buildExportPayload, exportFilename } from './todos/taskRepository';
-import { findTodo } from './todos/taskSelectors';
-import { useTasks } from './todos/useTasks';
-import { triggerHaptic } from './haptics';
+import { useTaskScreen } from './hooks/useTaskScreen';
+import type { Todo } from './todos/model';
 import { useTheme } from './theme/useTheme';
 import type { Theme } from './theme/theme';
 
@@ -62,18 +52,15 @@ export type WelcomeComponentProps = {
 };
 
 /**
- * The composition point: where the screens are chosen, and where the rules that
- * cross two domains are written.
+ * The composition point: which screen is showing, the two sheets, and the rows.
  *
- * Everything single-domain now has a home of its own. The list, its persistence
- * and its CRUD are `todos/useTasks`; the countdown, its picker and the row's
- * timer controls are `hooks/useTimerOrchestration`; the dashboard column and the
- * task list are presentational screens under `components/`. What is left here is
- * only the crossing: a timer's expiry decides both what happens to its task and
- * which way the session is closed; a deletion owes the timer a cancellation; a
- * completion must clear the timer and lock guards before it may write. None of
- * those rules can sit on one side without the other, which is why they have not
- * been pushed into either hook.
+ * The task logic — the list and its CRUD, the countdown and its picker, the
+ * session log, and the rules that cross them — has a single home in
+ * `hooks/useTaskScreen`, which this reads once. What is left here is only
+ * composition: the screen switch, the two modals both screens share, and the
+ * one-line `renderRow` that binds a task to the controller's row props. Keeping
+ * the JSX in the view is why the controller returns `rowPropsFor` rather than a
+ * renderer.
  *
  * The screens are still one component rather than three over a provider, and
  * that remains deliberate: there is one piece of navigation state (the `screen`
@@ -87,282 +74,26 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
   // module scope. `useTheme` returns a stable object, so this only recomputes
   // when the system colour scheme actually flips.
   const styles = useMemo(() => createStyles(t), [t]);
-  // Owning the list — state, load/save, create/edit/delete and the two
-  // completion writes — is `todos/useTasks`'s job. What stays here are the rules
-  // that need *both* sides: a timer and a task, a session log and a task.
-  const { todos, createTodo, updateTodo, removeTodo, completeTodos, setCompleted } = useTasks();
-  // The notification layer already asks the OS for permission on mount — above
-  // this component, in `NotificationProvider` — and owns the answer. Keeping a
-  // second copy here meant two identical requests and two states for one fact.
-  const { permission } = useNotifications();
-  // Which task the edit sheet is open for, if any. The sheet holds the form state
-  // itself — the old inline rename kept `editIndex` *and* `editText` here, a
-  // second copy of what was already typed, and could only carry a title.
-  const [editingId, setEditingId] = useState<string | null>(null);
-  // The task sheet: creating and editing both. A boolean rather than a navigation
-  // library — there is no router in this app, and one sheet is not a reason to
-  // add one.
-  const [showTaskSheet, setShowTaskSheet] = useState(false);
-
-  // Today's day key, once per render and shared by every row. It cannot differ
-  // between rows, and `localDateKey` builds a `Date` to do it, so computing it
-  // inside the row loop would repeat that work once per task on every tick.
-  const today = todayKey();
-
   const {
-    snapshot,
-    setTasks,
-    startFocus,
-    pauseFocus,
-    resumeFocus,
-    finishFocus,
-    noteActivity,
-    attributionFor,
-  } = useProductivity();
-
-  // Feed the task list to the scoring layer. Passed by reference, so this only
-  // costs a recompute when the list genuinely changes — not on the one-second
-  // timer re-render below.
-  useEffect(() => {
-    setTasks(todos);
-  }, [todos, setTasks]);
-
-  /**
-   * True when a timer on this task ran all the way to zero.
-   *
-   * Derived from the session log rather than stored on the task, so the lock is
-   * a fact about what happened instead of a flag that could drift out of sync
-   * with it.
-   */
-  const isLocked = useCallback(
-    (id: string) => attributionFor(id).isTimerCompleted,
-    [attributionFor],
-  );
-
-  /**
-   * Fired when timers reach their end time — from the 1s tick, or on the next
-   * foreground if JS was suspended and the interval never ran. The pending
-   * notification is not cancelled here: the OS has already delivered it, and
-   * Notifee drops one-shot timestamp triggers once they fire.
-   */
-  const handleTimerExpired = useCallback(
-    (ids: string[]) => {
-      const completedAt = Date.now();
-      completeTodos(ids, completedAt);
-      // Option A: a timer that ran to zero completed its task, so the session is
-      // closed as `completed` — this is what earns the momentum bonus.
-      for (const id of ids) {
-        finishFocus(id, 'completed');
-      }
-    },
-    [completeTodos, finishFocus],
-  );
-
-  /**
-   * The timer, its picker and the row controls around them.
-   *
-   * The engine (`useFocusTimer`) keeps ticking inside the hook; what this
-   * component supplies is the *other* side of every timer event — what a start,
-   * a pause, a stop and an expiry each mean for the task and the session log.
-   * Those five are the cross-domain rules and they stay here, where both the
-   * productivity layer and the task list are in reach.
-   */
-  const {
-    hasTimer,
-    isRunning,
-    clearTimer,
+    todos,
+    notificationsBlocked,
+    editingTodo,
+    showTaskSheet,
     pickerVisible,
     setPickerVisible,
-    openTimerPicker,
     handleTimerConfirm,
     handleTimerCancel,
-    stopTimer,
-    toggleTimerRunning,
-    formatTimeForTodo,
-  } = useTimerOrchestration({
-    onTimerExpired: handleTimerExpired,
-    onStartFocus: startFocus,
-    onPauseFocus: pauseFocus,
-    onResumeFocus: resumeFocus,
-    // A deliberate stop and a natural expiry are both "the session is over";
-    // only the *status* differs, which is the argument the hook passes through.
-    onStopFocus: finishFocus,
-  });
+    openCreate,
+    closeTaskSheet,
+    submitTask,
+    exportTodos,
+    rowPropsFor,
+  } = useTaskScreen();
 
-  /**
-   * Whether the completion checkbox is inert, for two different reasons:
-   *
-   *  - a live focus timer is attached, running or paused. The task is mid-focus,
-   *    and completing it by hand would count the work twice — once now, and once
-   *    again when the timer reaches zero and completes it.
-   *  - a finished timer already locked it. That one only blocks *reopening*: a
-   *    locked task that is somehow still open can still be completed, so marking
-   *    every locked task disabled would be wrong.
-   *
-   * Defined once and used for both the dimmed look and the accessibility state,
-   * so the checkbox cannot look disabled while still reporting itself enabled
-   * to VoiceOver.
-   */
-  const isCompletionDisabled = useCallback(
-    (id: string, completed: boolean): boolean =>
-      hasTimer(id) || (completed && isLocked(id)),
-    [hasTimer, isLocked],
-  );
-
-  /**
-   * The task the edit sheet is open for, or null in create mode.
-   *
-   * Derived rather than stored: the sheet needs a `Todo` to prefill from, and
-   * storing it would be a second reference to an object the list already owns — one
-   * that silently went stale the moment anything else rewrote that task.
-   */
-  const editingTodo = editingId ? findTodo(todos, editingId) ?? null : null;
-
-  /** Create mode: no task, so the sheet starts empty. */
-  const openCreate = useCallback(() => {
-    setEditingId(null);
-    setShowTaskSheet(true);
-  }, []);
-
-  const openEdit = useCallback((id: string) => {
-    setEditingId(id);
-    setShowTaskSheet(true);
-  }, []);
-
-  const closeTaskSheet = useCallback(() => {
-    // Both are cleared together. Leaving an id behind would make the *next* open of
-    // the sheet save over a task the user is not looking at.
-    setShowTaskSheet(false);
-    setEditingId(null);
-  }, []);
-
-  /**
-   * Applies the sheet's draft: creates a task, or rewrites an existing one.
-   *
-   * One submit path for both jobs, because they are the same fields. The merge
-   * rules — which fields an edit may overwrite, which are facts about the task,
-   * that a draft with no tag leaves the task's own tag alone — are the domain's
-   * and live with `taskOperations`. What only this component can do happens
-   * here: the productivity layer is told the list changed, a new task buzzes,
-   * and either way the sheet closes.
-   */
-  const submitTask = useCallback(
-    (draft: TodoDraft) => {
-      if (editingId) {
-        updateTodo(editingId, draft);
-        noteActivity();
-      } else {
-        createTodo(draft);
-        triggerHaptic('taskAdded');
-        noteActivity();
-      }
-      closeTaskSheet();
-    },
-    [closeTaskSheet, createTodo, editingId, noteActivity, updateTodo],
-  );
-
-  const deleteTodo = (id: string) => {
-    triggerHaptic('taskDeleted');
-    cancelTimerNotification(id);
-    // Before removing the task, so a running timer cannot outlive its subject.
-    clearTimer(id);
-    // The focus really was spent, it just never produced a completion.
-    finishFocus(id, 'stopped');
-    removeTodo(id);
-  };
-
-  const toggleComplete = (id: string) => {
-    const target = findTodo(todos, id);
-    const nowCompleted = !(target?.completed ?? false);
-
-    // A task with a live focus timer is mid-session, and its checkbox is shown
-    // disabled. The rule lives here rather than only in the render so that a
-    // checkbox which merely *looks* disabled cannot be completed by a stray tap:
-    // completing now would bank the completion immediately and then bank the
-    // focus time again when the timer reached zero, counting one piece of work
-    // twice. Either the timer completes the task, or stopping it hands the
-    // decision back to the user.
-    if (hasTimer(id)) {
-      return;
-    }
-
-    // A task whose timer ran all the way to zero is locked. The focus time was
-    // already spent, so letting a tap undo it would silently rewrite the day's
-    // statistics — the streak and mission would drop for work that genuinely
-    // happened. Return before touching any state, so a locked task is a true
-    // no-op rather than an undo queued behind a guard.
-    if (!nowCompleted && attributionFor(id).isTimerCompleted) {
-      return;
-    }
-
-    triggerHaptic(nowCompleted ? 'taskCompleted' : 'taskUncompleted');
-    cancelTimerNotification(id);
-    clearTimer(id);
-    // Both guards are checked, so the write happens only for a task that is
-    // allowed to move; `setCompleted` stamps the time itself.
-    setCompleted(id, nowCompleted);
-    // Ticking by hand mid-timer still earns focus credit, but it is recorded as
-    // `finished` rather than `completed`: the user chose to complete it, so the
-    // completion stays correctable. Only a timer running out locks.
-    finishFocus(id, nowCompleted ? 'finished' : 'stopped');
-    noteActivity();
-  };
-
-  /**
-   * One task row, for whichever list is asking.
-   *
-   * A single function rather than a prop-drilled pile of handlers, because the
-   * unfiltered list and each tag view must show identical rows: same checkbox
-   * rules, same timer controls, same inline rename. Every behaviour a row has is
-   * a closure over the state above, so there is nothing here that could be
-   * defined twice and drift.
-   *
-   * Also the reason `AllTasksScreen` takes a renderer instead of the handlers
-   * themselves — it has no opinion about how a task behaves.
-   */
-  const renderRow = (todo: Todo) => (
-    <TodoRow
-      completionDisabled={isCompletionDisabled(todo.id, todo.completed)}
-      dueLabel={todo.dueDate ? formatDueLabel(todo.dueDate, today) : undefined}
-      hasTimer={hasTimer(todo.id)}
-      isLocked={isLocked(todo.id)}
-      isRunning={isRunning(todo.id)}
-      onDelete={() => deleteTodo(todo.id)}
-      onEdit={() => openEdit(todo.id)}
-      onStartFocus={() => openTimerPicker(todo.id)}
-      onStopTimer={() => stopTimer(todo.id)}
-      onToggleComplete={() => toggleComplete(todo.id)}
-      onToggleTimerRunning={() => toggleTimerRunning(todo.id)}
-      timerLabel={formatTimeForTodo(todo.id)}
-      todo={todo}
-    />
-  );
-
-  const exportTodos = async () => {
-    if (todos.length === 0) {
-      Alert.alert('Nothing to export', 'Add a task before exporting your list.');
-      return;
-    }
-
-    // The body and the filename are the domain's, not this component's: the
-    // same shape is asserted in `todos/taskRepository`, so an export written
-    // here cannot drift from the one the rest of the app expects.
-    const payload = buildExportPayload(todos, snapshot);
-    const fileName = exportFilename(payload);
-    const json = JSON.stringify(payload, null, 2);
-
-    try {
-      // iOS/Android share sheet: lets the user save to Files, send to mail, etc.
-      // The filename is passed through the message so it survives the round trip.
-      await Share.share({
-        title: 'Export tasks',
-        message: `${fileName}\n\n${json}`,
-      }, { subject: fileName });
-    } catch (error) {
-      console.error('Failed to export todos:', error);
-      Alert.alert('Export failed', 'Could not open the share sheet.');
-    }
-  };
+  // The one renderer both lists share. It is a one-liner here rather than in the
+  // controller because it is JSX: the controller answers "what are this row's
+  // props", and the view is what turns that into an element.
+  const renderRow = (todo: Todo) => <TodoRow {...rowPropsFor(todo)} />;
 
   // Both sheets are built here, outside the branch, and rendered in both screens.
   // The add sheet has to work from either screen — you can be mid-focus with the
@@ -432,7 +163,7 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
   return (
     <View style={styles.screen}>
       <HomeScreen
-        notificationsBlocked={permission === 'denied'}
+        notificationsBlocked={notificationsBlocked}
         onAddTask={openCreate}
         onExport={exportTodos}
         onOpenTag={(tag) => onNavigate({ name: 'tag', tag })}
