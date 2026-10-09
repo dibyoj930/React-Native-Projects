@@ -4,6 +4,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import WelcomeComponent, { type Screen } from './WelcomeComponent';
+import { useReminders } from './hooks/useReminders';
 import { NotificationProvider, useNotifications } from './notifications';
 import { ProductivityProvider } from './productivity';
 import { ThemeProvider } from './theme/ThemeProvider';
@@ -61,6 +62,10 @@ function AppContent() {
   const styles = useMemo(() => createStyles(t), [t]);
   const [screen, setScreen] = useState<Screen>({ name: 'home' });
   const { pressedTodoId, clearPressedTodo } = useNotifications();
+
+  // Reminders need both the notification layer and the productivity snapshot, so
+  // they are reconciled here, below both providers.
+  useReminders();
 
   // A tapped timer notification asks to see the task it was about, and the only
   // place a task is shown is the list. The intent is consumed as it is honoured,

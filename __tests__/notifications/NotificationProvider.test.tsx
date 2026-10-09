@@ -14,7 +14,7 @@ import ReactTestRenderer from 'react-test-renderer';
 import notifee, { EventType } from '@notifee/react-native';
 
 import { NotificationProvider, useNotifications } from '../../notifications';
-import { render } from '../support/render';
+import { withRendered } from '../support/render';
 
 type Notifications = ReturnType<typeof useNotifications>;
 
@@ -55,24 +55,24 @@ beforeEach(() => {
 
 describe('NotificationProvider — presses', () => {
   it('surfaces the task id of a pressed notification, then clears it', async () => {
-    await render(tree());
+    await withRendered(tree(), async () => {
+      await deliver({
+        type: EventType.PRESS,
+        detail: { notification: { data: { todoId: 'task-1' } } },
+      });
+      expect(api!.pressedTodoId).toBe('task-1');
 
-    await deliver({
-      type: EventType.PRESS,
-      detail: { notification: { data: { todoId: 'task-1' } } },
+      await act(() => api!.clearPressedTodo());
+      expect(api!.pressedTodoId).toBeNull();
     });
-    expect(api!.pressedTodoId).toBe('task-1');
-
-    await act(() => api!.clearPressedTodo());
-    expect(api!.pressedTodoId).toBeNull();
   });
 
   it('ignores a press that carries no task id', async () => {
-    await render(tree());
+    await withRendered(tree(), async () => {
+      await deliver({ type: EventType.PRESS, detail: { notification: { data: {} } } });
 
-    await deliver({ type: EventType.PRESS, detail: { notification: { data: {} } } });
-
-    expect(api!.pressedTodoId).toBeNull();
+      expect(api!.pressedTodoId).toBeNull();
+    });
   });
 
   it('picks up the notification that launched the app from cold', async () => {
@@ -80,24 +80,25 @@ describe('NotificationProvider — presses', () => {
       notification: { data: { todoId: 'task-9' } },
     });
 
-    await render(tree());
-    await settle();
+    await withRendered(tree(), async () => {
+      await settle();
 
-    expect(api!.pressedTodoId).toBe('task-9');
+      expect(api!.pressedTodoId).toBe('task-9');
+    });
   });
 });
 
 describe('NotificationProvider — foreground delivery', () => {
   it('shows a banner for a delivered notification', async () => {
-    await render(tree());
+    await withRendered(tree(), async () => {
+      await deliver({
+        type: EventType.DELIVERED,
+        detail: {
+          notification: { id: 'timer-1', title: 'Timer done', body: 'Time is up' },
+        },
+      });
 
-    await deliver({
-      type: EventType.DELIVERED,
-      detail: {
-        notification: { id: 'timer-1', title: 'Timer done', body: 'Time is up' },
-      },
+      expect(api!.banner).toEqual({ id: 'timer-1', title: 'Timer done', body: 'Time is up' });
     });
-
-    expect(api!.banner).toEqual({ id: 'timer-1', title: 'Timer done', body: 'Time is up' });
   });
 });

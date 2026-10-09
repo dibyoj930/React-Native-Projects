@@ -10,12 +10,26 @@
 
 import notifee from '@notifee/react-native';
 
-import { getPendingTimers } from '../../notifications/notificationService';
+import {
+  cancelReminder,
+  getPendingReminders,
+  getPendingTimers,
+  scheduleReminder,
+} from '../../notifications/notificationService';
 
 const getTriggerNotifications = notifee.getTriggerNotifications as unknown as jest.Mock;
+const createTriggerNotification = notifee.createTriggerNotification as unknown as jest.Mock;
+const cancelTriggerNotification = notifee.cancelTriggerNotification as unknown as jest.Mock;
+const requestPermission = notifee.requestPermission as unknown as jest.Mock;
 
 beforeEach(() => {
   getTriggerNotifications.mockReset();
+  createTriggerNotification.mockReset();
+  createTriggerNotification.mockResolvedValue('trigger');
+  cancelTriggerNotification.mockReset();
+  cancelTriggerNotification.mockResolvedValue(undefined);
+  requestPermission.mockReset();
+  requestPermission.mockResolvedValue({ authorizationStatus: 1 });
 });
 
 /** A trigger-notification shaped like the one the timer path schedules. */
@@ -54,5 +68,55 @@ describe('getPendingTimers', () => {
     await expect(getPendingTimers()).resolves.toEqual([]);
     expect(warn).toHaveBeenCalled();
     warn.mockRestore();
+  });
+});
+
+describe('getPendingReminders', () => {
+  it('returns the id and fire time of every pending reminder', async () => {
+    getTriggerNotifications.mockResolvedValueOnce([
+      { notification: { data: { reminder: 'daily-2026-05-04' } }, trigger: { timestamp: 1_000 } },
+      { notification: { data: { reminder: 'streak-2026-05-04' } }, trigger: { timestamp: 2_000 } },
+      // A timer notification is not a reminder.
+      { notification: { data: { todoId: 'task-1' } }, trigger: { timestamp: 3_000 } },
+    ]);
+
+    await expect(getPendingReminders()).resolves.toEqual([
+      { id: 'daily-2026-05-04', fireAt: 1_000 },
+      { id: 'streak-2026-05-04', fireAt: 2_000 },
+    ]);
+  });
+});
+
+describe('scheduleReminder', () => {
+  it('schedules a one-shot trigger under a prefixed id', async () => {
+    const fireAt = Date.now() + 60_000;
+
+    await scheduleReminder({ id: 'daily-2026-05-04', title: 'Plan', body: 'Go', fireAt });
+
+    expect(createTriggerNotification).toHaveBeenCalledTimes(1);
+    const [notification, trigger] = createTriggerNotification.mock.calls[0];
+    expect(notification).toMatchObject({
+      id: 'reminder-daily-2026-05-04',
+      title: 'Plan',
+      body: 'Go',
+      data: { reminder: 'daily-2026-05-04' },
+    });
+    expect(trigger).toMatchObject({ type: 0, timestamp: fireAt });
+  });
+
+  it('schedules nothing without permission', async () => {
+    requestPermission.mockResolvedValueOnce({ authorizationStatus: 0 });
+
+    await scheduleReminder({ id: 'daily-2026-05-04', title: 'Plan', body: 'Go', fireAt: Date.now() + 1 });
+
+    expect(createTriggerNotification).not.toHaveBeenCalled();
+  });
+});
+
+describe('cancelReminder', () => {
+  it('cancels the trigger by its prefixed id', async () => {
+    await cancelReminder('daily-2026-05-04');
+
+    expect(cancelTriggerNotification).toHaveBeenCalledWith('reminder-daily-2026-05-04');
   });
 });

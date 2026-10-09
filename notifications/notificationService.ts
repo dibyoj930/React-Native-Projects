@@ -98,6 +98,37 @@ export type PendingTimer = {
   fireAt: number;
 };
 
+/** A reminder the OS still holds, and when it will fire. */
+export type PendingReminder = {
+  /** Stable reminder identity, without the notification-id prefix. */
+  id: string;
+  /** Epoch ms the OS will deliver the notification. */
+  fireAt: number;
+};
+
+/**
+ * Every pending trigger, with the epoch ms it will fire.
+ *
+ * Timers and reminders read the same native list and differ only in the data key
+ * that identifies them, so the query and the shape check live once here and the
+ * readers below decode only their own key.
+ */
+async function readPendingTriggers(): Promise<
+  { data: Notification['data']; fireAt: number }[]
+> {
+  try {
+    const triggers = await notifee.getTriggerNotifications();
+    return triggers.flatMap((entry) => {
+      const fireAt = (entry.trigger as { timestamp?: number }).timestamp;
+      if (typeof fireAt !== 'number') return [];
+      return [{ data: entry.notification.data, fireAt }];
+    });
+  } catch (error) {
+    console.warn('[notifications] getTriggerNotifications failed:', error);
+    return [];
+  }
+}
+
 /**
  * The timer notifications the OS still holds.
  *
@@ -108,18 +139,67 @@ export type PendingTimer = {
  * caller rather than living here.
  */
 export async function getPendingTimers(): Promise<PendingTimer[]> {
+  const pending = await readPendingTriggers();
+  return pending.flatMap(({ data, fireAt }) => {
+    const taskId = data?.todoId;
+    return typeof taskId === 'string' ? [{ taskId, fireAt }] : [];
+  });
+}
+
+/** The reminder notifications the OS still holds. */
+export async function getPendingReminders(): Promise<PendingReminder[]> {
+  const pending = await readPendingTriggers();
+  return pending.flatMap(({ data, fireAt }) => {
+    const id = data?.reminder;
+    return typeof id === 'string' ? [{ id, fireAt }] : [];
+  });
+}
+
+export interface ReminderNotificationInput {
+  /** Reminder identity; the OS notification id is prefixed with `reminder-`. */
+  id: string;
+  title: string;
+  body: string;
+  /** Date.now() based epoch ms for when it should fire. */
+  fireAt: number;
+}
+
+/** Schedules one reminder as a one-shot timestamp trigger. */
+export async function scheduleReminder(input: ReminderNotificationInput): Promise<void> {
+  const permission = await ensurePermission();
+  if (permission !== 'granted') return;
+
   try {
-    const triggers = await notifee.getTriggerNotifications();
-    return triggers.flatMap((entry) => {
-      const { notification, trigger } = entry;
-      const taskId = notification.data?.todoId;
-      const fireAt = (trigger as { timestamp?: number }).timestamp;
-      if (typeof taskId !== 'string' || typeof fireAt !== 'number') return [];
-      return [{ taskId, fireAt }];
-    });
+    await notifee.createTriggerNotification(
+      {
+        id: `reminder-${input.id}`,
+        title: input.title,
+        body: input.body,
+        data: { reminder: input.id },
+        ios: {
+          foregroundPresentationOptions: {
+            banner: true,
+            sound: true,
+            list: true,
+          },
+        },
+      },
+      {
+        type: TriggerType.TIMESTAMP,
+        timestamp: Math.max(input.fireAt, Date.now() + 1000),
+      },
+    );
   } catch (error) {
-    console.warn('[notifications] getPendingTimers failed:', error);
-    return [];
+    console.warn('[notifications] scheduleReminder failed:', error);
+  }
+}
+
+/** Removes a pending reminder notification. */
+export async function cancelReminder(id: string): Promise<void> {
+  try {
+    await notifee.cancelTriggerNotification(`reminder-${id}`);
+  } catch (error) {
+    console.warn('[notifications] cancelReminder failed:', error);
   }
 }
 
