@@ -68,6 +68,14 @@ export type TodoRowProps = {
    * timezone-free.
    */
   dueLabel?: string;
+  /**
+   * Whether that date is in the past. Only read when `dueLabel` is present.
+   *
+   * Passed in for the same reason as `dueLabel`: answering it needs today's day
+   * key, and the row has no clock. The controller derives it from the task, so
+   * the row only decides how an overdue date *looks*.
+   */
+  overdue: boolean;
 };
 
 export function TodoRow({
@@ -84,6 +92,7 @@ export function TodoRow({
   onEdit,
   onDelete,
   dueLabel,
+  overdue,
 }: TodoRowProps) {
   const t = useTheme();
   // Theme-derived, so built per theme rather than at module scope.
@@ -144,9 +153,11 @@ export function TodoRow({
               <MaterialCommunityIcons
                 name="calendar-blank-outline"
                 size={12}
-                color={t.colors.textMuted}
+                color={overdue ? t.colors.danger : t.colors.textMuted}
               />
-              <Text style={styles.dueText}>{dueLabel}</Text>
+              <Text style={[styles.dueText, overdue && styles.dueTextOverdue]}>
+                {dueLabel}
+              </Text>
             </View>
           )}
 
@@ -362,6 +373,17 @@ const createStyles = (t: Theme) => {
     dueText: {
       fontSize: 12,
       color: c.textMuted,
+    },
+    /**
+     * A date that has already passed.
+     *
+     * Colour alone carries the status: the label already gives the date, and the
+     * list's `Overdue` heading says what the colour means. Weight as well as
+     * colour, so it does not rely on red being distinguishable from grey.
+     */
+    dueTextOverdue: {
+      color: c.danger,
+      fontWeight: '600',
     },
     timerText: {
       fontSize: 14,

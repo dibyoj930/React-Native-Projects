@@ -28,7 +28,7 @@ import type { TodoRowProps } from '../components/TodoRow';
 import type { Todo, TodoDraft } from '../todos/model';
 import { buildExportPayload, exportFilename } from '../todos/taskRepository';
 import { isCompletionDisabled, manualToggleStatus } from '../todos/taskRules';
-import { findTodo } from '../todos/taskSelectors';
+import { findTodo, isOverdue } from '../todos/taskSelectors';
 import { useTasks } from '../todos/useTasks';
 import type { TimerState } from './useFocusTimer';
 import { useTimerOrchestration } from './useTimerOrchestration';
@@ -36,6 +36,13 @@ import { useTimerOrchestration } from './useTimerOrchestration';
 /** Everything `WelcomeComponent` reads to compose its screens. */
 export type TaskScreen = {
   todos: Todo[];
+  /**
+   * Today's local day key.
+   *
+   * Shared by the row labels and the list's due-date grouping, computed once per
+   * render so two consumers cannot disagree about what "today" is.
+   */
+  today: string;
   /** Notifications were asked for and refused, so a timer's alert will not land. */
   notificationsBlocked: boolean;
   /** The task the edit sheet is open for, or null in create mode. */
@@ -352,6 +359,7 @@ export function useTaskScreen(): TaskScreen {
         isLocked(todo.id),
       ),
       dueLabel: todo.dueDate ? formatDueLabel(todo.dueDate, today) : undefined,
+      overdue: isOverdue(todo, today),
       hasTimer: hasTimer(todo.id),
       isLocked: isLocked(todo.id),
       isRunning: isRunning(todo.id),
@@ -380,6 +388,7 @@ export function useTaskScreen(): TaskScreen {
 
   return {
     todos,
+    today,
     notificationsBlocked: permission === 'denied',
     editingTodo,
     showTaskSheet,

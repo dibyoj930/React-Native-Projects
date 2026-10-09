@@ -145,3 +145,32 @@ export async function press(renderer: Rendered, label: string): Promise<void> {
   }
   throw new Error(`element labelled ${JSON.stringify(label)} has no onPress anywhere above it`);
 }
+
+/**
+ * Types `value` into the input carrying this accessibility label.
+ *
+ * The `TextInput` counterpart to `press`, and it walks the tree for the same
+ * reason: `onChangeText` lives on the composite, not on the host view the label
+ * identifies.
+ */
+export async function typeText(
+  renderer: Rendered,
+  label: string,
+  value: string,
+): Promise<void> {
+  const host = byLabel(renderer, label);
+  let cursor: ReactTestRenderer.ReactTestInstance | null = host;
+  while (cursor) {
+    if (typeof cursor.props?.onChangeText === 'function') {
+      const { onChangeText } = cursor.props;
+      await ReactTestRenderer.act(async () => {
+        onChangeText(value);
+      });
+      return;
+    }
+    cursor = cursor.parent;
+  }
+  throw new Error(
+    `element labelled ${JSON.stringify(label)} has no onChangeText anywhere above it`,
+  );
+}

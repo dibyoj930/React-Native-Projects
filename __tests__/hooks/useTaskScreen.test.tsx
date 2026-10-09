@@ -16,6 +16,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTaskScreen } from '../../hooks/useTaskScreen';
 import { NotificationProvider } from '../../notifications';
 import { ProductivityProvider } from '../../productivity';
+import { addDays, todayKey } from '../../productivity/domain';
 import type { Todo } from '../../todos/model';
 import { render } from '../support/render';
 
@@ -175,5 +176,27 @@ describe('useTaskScreen — clearing everything', () => {
     // The per-task cleanup ran before the list emptied: the focused task's row no
     // longer believes a timer is attached.
     expect(api!.rowPropsFor(todo).hasTimer).toBe(false);
+  });
+});
+
+describe('useTaskScreen — due-date status', () => {
+  beforeEach(async () => {
+    await render(controllerTree());
+    await settle();
+  });
+
+  it('flags an overdue task on its row, and stops once it is done', async () => {
+    const yesterday = addDays(todayKey(), -1);
+    await act(() => api!.openCreate());
+    await act(() => api!.submitTask({ text: 'Pay the bill', dueDate: yesterday }));
+    const todo = api!.todos[0];
+
+    expect(api!.rowPropsFor(todo).overdue).toBe(true);
+    expect(api!.rowPropsFor(todo).dueLabel).toBe('Yesterday');
+
+    await act(() => api!.rowPropsFor(todo).onToggleComplete());
+    expect(api!.todos[0].completed).toBe(true);
+    // A done task is never nagged about, so the row drops the flag.
+    expect(api!.rowPropsFor(api!.todos[0]).overdue).toBe(false);
   });
 });

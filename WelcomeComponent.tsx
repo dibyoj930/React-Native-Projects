@@ -79,6 +79,7 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
   const styles = useMemo(() => createStyles(t), [t]);
   const {
     todos,
+    today,
     notificationsBlocked,
     editingTodo,
     showTaskSheet,
@@ -182,6 +183,7 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
         <AllTasksScreen
           filterTag={tag}
           title={tag ?? 'All tasks'}
+          today={today}
           onAddTask={openCreate}
           onBack={() => onNavigate({ name: 'home' })}
           renderRow={renderRow}

@@ -7,8 +7,10 @@
  */
 
 import React from 'react';
+import { StyleSheet } from 'react-native';
 import { TodoRow, type TodoRowProps } from '../../components/TodoRow';
 import type { Todo } from '../../todos/model';
+import { lightTheme } from '../../theme/theme';
 import { byLabel, hostNodes, labels, nodes, press, textContent, visibleText, withRendered } from '../support/render';
 
 const TODO: Todo = {
@@ -33,6 +35,7 @@ function props(overrides: Partial<TodoRowProps> = {}): TodoRowProps {
     onStopTimer: () => {},
     onEdit: () => {},
     onDelete: () => {},
+    overdue: false,
     ...overrides,
   };
 }
@@ -166,6 +169,29 @@ describe('TodoRow — the due date line', () => {
         expect(visibleText(renderer)).not.toContain('Tomorrow');
       },
     );
+  });
+
+  it('marks a past date with the danger token rather than the muted one', async () => {
+    await withRendered(
+      <TodoRow {...props({ dueLabel: 'May 3', overdue: true })} />,
+      (renderer) => {
+        const date = hostNodes(renderer).find(
+          (node) => String(node.type) === 'Text' && node.children.includes('May 3'),
+        );
+        expect(date).toBeDefined();
+        expect(StyleSheet.flatten(date?.props.style).color).toBe(lightTheme.colors.danger);
+      },
+    );
+  });
+
+  it('leaves a current or future date muted', async () => {
+    await withRendered(<TodoRow {...props({ dueLabel: 'Tomorrow' })} />, (renderer) => {
+      const date = hostNodes(renderer).find(
+        (node) => String(node.type) === 'Text' && node.children.includes('Tomorrow'),
+      );
+      expect(date).toBeDefined();
+      expect(StyleSheet.flatten(date?.props.style).color).toBe(lightTheme.colors.textMuted);
+    });
   });
 });
 
