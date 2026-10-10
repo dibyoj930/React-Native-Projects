@@ -146,7 +146,7 @@ a full reload:
 
 ## Quality gates
 
-Run from `Native/MyApp/`:
+Run from the project root:
 
 ```sh
 npx tsc --noEmit   # types
