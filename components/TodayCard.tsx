@@ -1,14 +1,19 @@
 import React, { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import MaterialCommunityIcons from '@react-native-vector-icons/material-design-icons';
 
-import {
-  MOMENTUM_BAND_LABELS,
-  formatDuration,
-  progressRatio,
-  useProductivity,
-} from '../productivity';
+import { goalsProgress, motivationFor, type DailyGoals } from '../daily-goals';
+import { MOMENTUM_BAND_LABELS, formatDuration, useProductivity } from '../productivity';
+import { GoalMeter } from './GoalMeter';
 import { useTheme } from '../theme/useTheme';
 import type { Theme } from '../theme/theme';
+
+export type TodayCardProps = {
+  /** The user's saved targets; the tile measures today against them. */
+  goals: DailyGoals;
+  /** Opens the Goals & Preferences screen. */
+  onOpenGoals: () => void;
+};
 
 /**
  * Today, in one glance: how much focus and how many tasks, against the day's two
@@ -28,89 +33,66 @@ import type { Theme } from '../theme/theme';
  * together, then a bar the width of the card — costs one extra line and buys a
  * track you can actually measure progress against.
  *
- * The score is still computed, with the same weights and decay. It is simply not
- * something the user has to study.
- *
- * Mounted *outside* the task list, where the old "N of M tasks done" row lived,
- * so it stays put rather than scrolling away.
+ * The whole tile is the way into the editor: tapping it opens the Goals &
+ * Preferences screen rather than editing inline in a dialog. The goals arrive as
+ * a prop, so the one source of truth lives above, where the screen that edits
+ * them also reads it.
  */
-export function TodayCard() {
+export function TodayCard({ goals, onOpenGoals }: TodayCardProps) {
   const t = useTheme();
   const styles = useMemo(() => createStyles(t), [t]);
   const { snapshot } = useProductivity();
-  const { todayRollup, missionToday, momentum } = snapshot;
 
+  const { todayRollup, momentum } = snapshot;
   const focusedSeconds = todayRollup?.focusedSeconds ?? 0;
 
-  // Both targets come from the mission ladder, which escalates with the streak
-  // (25–60 min, 1–4 tasks). That ladder is a streak *difficulty* knob rather than
-  // a statement about how much work a day holds, so the focus target is low for
-  // anyone actually working: 90 minutes reads as a permanently full bar. Both
-  // numbers are read from `missionToday` in one place, so replacing the focus
-  // target with a user-set daily goal is a change to this block only.
-  const focusGoalSeconds = missionToday.focusTarget * 60;
-  const focusDone = formatDuration(focusedSeconds);
-  const focusGoal = formatDuration(focusGoalSeconds);
+  // The targets are the user's saved goals, measured against today's rollup.
+  // They are deliberately *not* the mission ladder's targets: that ladder is a
+  // streak *difficulty* knob, not a statement about how much work a day holds,
+  // so it stays out of the display. `goalsProgress` clamps each ratio, so a goal
+  // passed by any margin fills its bar without overrunning the track.
+  const progress = goalsProgress(todayRollup, goals);
 
   return (
-    <View style={styles.card}>
+    <TouchableOpacity
+      accessibilityLabel="Open goals and preferences"
+      accessibilityRole="button"
+      activeOpacity={0.8}
+      onPress={onOpenGoals}
+      style={styles.card}
+    >
       {/* The momentum line leads. It is the one sentence on this card a person
           actually reads, and it answers the same "how is today going?" question
           the page title already asks — so the card no longer repeats "Today"
-          above its own numbers. */}
-      <Text style={styles.momentum}>{MOMENTUM_BAND_LABELS[momentum.band]}</Text>
+          above its own numbers. The chevron is the affordance that says the card
+          is a way in. */}
+      <View style={styles.headerRow}>
+        <Text style={styles.momentum}>{MOMENTUM_BAND_LABELS[momentum.band]}</Text>
+        <MaterialCommunityIcons
+          color={t.colors.textMuted}
+          name="chevron-right"
+          size={20}
+        />
+      </View>
 
-      <Meter
+      <GoalMeter
         label="Focus time"
-        value={`${focusDone} / ${focusGoal}`}
-        ratio={progressRatio(focusedSeconds, focusGoalSeconds)}
-        styles={styles}
+        value={`${formatDuration(focusedSeconds)} / ${formatDuration(goals.focusMinutes * 60)}`}
+        ratio={progress.focusRatio}
         tint={t.colors.primary}
       />
 
-      <Meter
+      <GoalMeter
         label="Tasks"
-        value={`${missionToday.tasksCompleted} / ${missionToday.tasksTarget}`}
-        ratio={missionToday.tasksRatio}
-        styles={styles}
-        tint={missionToday.tasksRatio >= 1 ? t.colors.primary : t.colors.textMuted}
+        value={`${progress.tasksCompleted} / ${goals.tasksCompleted}`}
+        ratio={progress.tasksRatio}
+        tint={progress.tasksRatio >= 1 ? t.colors.primary : t.colors.textMuted}
       />
-    </View>
-  );
-}
 
-/**
- * One goal: a name, a bar, and the actual-versus-target numbers.
- *
- * Both meters measure the same thing — progress toward a goal — so they share a
- * component rather than each carrying their own bar markup. The bar stays visible
- * past 100% of the target instead of clipping, so overshooting reads as beating
- * the goal rather than as a full bar that stopped moving.
- */
-function Meter({
-  label,
-  value,
-  ratio,
-  tint,
-  styles,
-}: {
-  label: string;
-  value: string;
-  ratio: number;
-  tint: string;
-  styles: ReturnType<typeof createStyles>;
-}) {
-  return (
-    <View style={styles.meter}>
-      <View style={styles.meterTop}>
-        <Text style={styles.meterLabel}>{label}</Text>
-        <Text style={styles.meterValue}>{value}</Text>
-      </View>
-      <View style={styles.track}>
-        <View style={[styles.fill, { flex: Math.max(ratio, 0.02), backgroundColor: tint }]} />
-        <View style={[styles.rest, { flex: Math.max(1 - ratio, 0) }]} />
-      </View>
-    </View>
+      {/* The encouragement line, chosen from today's progress by a pure
+          selector — deterministic, and never a scold for a quiet day. */}
+      <Text style={styles.motivation}>{motivationFor(progress)}</Text>
+    </TouchableOpacity>
   );
 }
 
@@ -125,6 +107,15 @@ const createStyles = (t: Theme) =>
       borderColor: t.colors.border,
     },
     /**
+     * The card's top line: the momentum sentence and the way-in chevron.
+     */
+    headerRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    /**
      * The encouragement line, which is the first thing the card says.
      *
      * Sits on its own row rather than beside the meters so a full sentence has
@@ -135,44 +126,9 @@ const createStyles = (t: Theme) =>
       fontSize: 15,
       fontWeight: '600',
     },
-    /**
-     * One goal: its name and numbers on one line, its bar full-width below.
-     *
-     * The value shares the name's line rather than trailing the bar, which is
-     * what frees the track to span the whole card instead of the narrow strip
-     * left between a fixed-width label and a fixed-width readout.
-     */
-    meter: {
-      gap: 6,
-    },
-    meterTop: {
-      flexDirection: 'row',
-      alignItems: 'baseline',
-      justifyContent: 'space-between',
-      gap: 8,
-    },
-    meterLabel: {
-      color: t.colors.text,
-      fontSize: 13,
-      fontWeight: '600',
-    },
-    track: {
-      flexDirection: 'row',
-      height: 8,
-      borderRadius: 4,
-      overflow: 'hidden',
-    },
-    fill: {
-      height: '100%',
-    },
-    rest: {
-      height: '100%',
-      backgroundColor: t.colors.progressTrack,
-    },
-    meterValue: {
+    /** The contextual encouragement line under the meters. */
+    motivation: {
       color: t.colors.textMuted,
       fontSize: 12,
-      fontVariant: ['tabular-nums'],
-      textAlign: 'right',
     },
   });

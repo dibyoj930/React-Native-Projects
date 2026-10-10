@@ -15,6 +15,7 @@ import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 
 import { HomeScreen, type HomeScreenProps } from '../../components/HomeScreen';
+import { DEFAULT_DAILY_GOALS } from '../../daily-goals';
 import { ProductivityProvider } from '../../productivity';
 import type { Todo } from '../../todos/model';
 import { AVAILABLE_TAGS } from '../../todos/tags';
@@ -40,6 +41,8 @@ function props(overrides: Partial<HomeScreenProps> = {}): HomeScreenProps {
     onAddTag: () => {},
     onAddTask: () => {},
     onOpenSettings: () => {},
+    goals: DEFAULT_DAILY_GOALS,
+    onOpenGoals: () => {},
     onExport: () => {},
     ...overrides,
   };

@@ -3,7 +3,7 @@
 A local-first React Native productivity app: a task list with per-task focus
 timers, OS notifications, a focus-session log with streaks/momentum, and a light
 theme system. It has no backend and no accounts; every fact the app renders is
-either in memory or one of three AsyncStorage keys.
+either in memory or one of five AsyncStorage keys.
 
 This document is the map: what the layers are, which one owns which fact, how
 data moves between them, and the invariants that hold the whole thing together.
@@ -134,6 +134,8 @@ library and is optional at runtime.
 | Notification permission + banner | `NotificationProvider` | no (asked each launch) |
 | Pending reminders (daily/streak) | Notifee, reconciled by `useReminders` | OS triggers |
 | Per-task reminders | Notifee, reconciled by `useTaskReminders` | OS triggers |
+| Daily goals | `useDailyGoals` in `WelcomeComponent` | `@daily-goals/v1` key |
+| Goals draft (unsaved fields) | `GoalsScreen` local state | no |
 | Theme override | `ThemeProvider` | `theme.preference` key |
 | Editing draft + modal form | `AddTodoModal` local state | n/a |
 
@@ -151,14 +153,14 @@ GestureHandlerRootView   swipe gestures must reach rows first
 ```
 
 `AppContent` is the app's entire navigation: a single `Screen` union
-(`home | tasks | tag | settings`) held above `WelcomeComponent`. No router is
-used because four destinations do not need a stack; the screens swap by
+(`home | tasks | tag | goals | settings`) held above `WelcomeComponent`. No router
+is used because five destinations do not need a stack; the screens swap by
 rendering one or the other, and Android hardware back is handled explicitly.
 
 `WelcomeComponent` is the composition point: it reads `useTaskScreen()` once,
-the settings controller once, and switches on `screen`. Both sheets
-(`AddTodoModal`, `TimerPickerModal`) are built once here and rendered in every
-branch, so they cannot drift between screens.
+the settings controller once, the daily-goals hook once, and switches on
+`screen`. Both sheets (`AddTodoModal`, `TimerPickerModal`) are built once here
+and rendered in every branch, so they cannot drift between screens.
 
 ## Controllers
 
@@ -175,6 +177,9 @@ branch, so they cannot drift between screens.
   and restore from an absolute end time.
 - `useReminders` reconciles the daily/streak plan; `useTaskReminders` reconciles
   per-task reminders.
+- `useDailyGoals` owns the user's daily targets: one hydration, one in-memory
+  value shared by the home tile and the Goals & Preferences screen, and
+  fire-and-forget writes under the `@daily-goals/v1` key.
 - `useSettings` owns confirmations and cross-domain resets for the Settings
   screen.
 

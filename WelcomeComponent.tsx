@@ -4,12 +4,15 @@ import { TimerPickerModal } from 'react-native-timer-picker';
 
 import { AddTodoModal } from './components/AddTodoModal';
 import { AllTasksScreen } from './components/AllTasksScreen';
+import { GoalsScreen } from './components/GoalsScreen';
 import { HomeScreen } from './components/HomeScreen';
 import { SettingsScreen } from './components/SettingsScreen';
 import { TodoRow } from './components/TodoRow';
+import { useDailyGoals } from './daily-goals';
 import type { TimerState } from './hooks/useFocusTimer';
 import { useSettings } from './hooks/useSettings';
 import { useTaskScreen } from './hooks/useTaskScreen';
+import { useProductivity } from './productivity';
 import type { Todo } from './todos/model';
 import { useTheme } from './theme/useTheme';
 import type { Theme } from './theme/theme';
@@ -46,6 +49,7 @@ export type Screen =
   | { name: 'home' }
   | { name: 'tasks' }
   | { name: 'tag'; tag: string }
+  | { name: 'goals' }
   | { name: 'settings' };
 
 export type WelcomeComponentProps = {
@@ -104,6 +108,16 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
     taskCount: todos.length,
     onClearTasks: clearAllTasks,
   });
+
+  // The user's daily targets live here, at the composition point, rather than in
+  // the tile that shows them: the tile and the Goals & Preferences screen both
+  // read the same fact, and a screen cannot own state it navigates away from.
+  // One hook call means one hydration and one in-memory source of truth.
+  const { goals, setGoals } = useDailyGoals();
+
+  // Today's rollup feeds the tile and the goals preview from one place, so the
+  // screen can stay presentational.
+  const { snapshot } = useProductivity();
 
   // The one renderer both lists share. It is a one-liner here rather than in the
   // controller because it is JSX: the controller answers "what are this row's
@@ -170,6 +184,25 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
     );
   }
 
+  if (screen.name === 'goals') {
+    // Its own destination, back to home, like Settings. The save commits the
+    // goals above and returns; a cancel/back simply returns, discarding the
+    // draft the screen held locally.
+    return (
+      <View style={styles.screen}>
+        <GoalsScreen
+          goals={goals}
+          onBack={() => onNavigate({ name: 'home' })}
+          onSave={(next) => {
+            setGoals(next);
+            onNavigate({ name: 'home' });
+          }}
+          todayRollup={snapshot.todayRollup}
+        />
+      </View>
+    );
+  }
+
   if (screen.name !== 'home') {
     // A full screen swap rather than a `Modal`. It is the app's only task list, so
     // it is a destination with somewhere to come back to, not a layer over the
@@ -201,9 +234,11 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
     <View style={styles.screen}>
       <HomeScreen
         notificationsBlocked={notificationsBlocked}
+        goals={goals}
         onAddTag={addTag}
         onAddTask={openCreate}
         onExport={exportTodos}
+        onOpenGoals={() => onNavigate({ name: 'goals' })}
         onOpenSettings={() => onNavigate({ name: 'settings' })}
         onOpenTag={(tag) => onNavigate({ name: 'tag', tag })}
         onOpenTasks={() => onNavigate({ name: 'tasks' })}

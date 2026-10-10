@@ -14,7 +14,7 @@ import ReactTestRenderer from 'react-test-renderer';
 import notifee, { EventType } from '@notifee/react-native';
 
 import App from '../App';
-import { visibleText } from './support/render';
+import { press, typeText, visibleText } from './support/render';
 
 test('mounts the full app tree', async () => {
   let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
@@ -62,6 +62,33 @@ test('opens the task list when a timer notification is tapped', async () => {
   });
 
   expect(visibleText(renderer!)).toContain('All tasks');
+
+  await ReactTestRenderer.act(async () => {
+    renderer!.unmount();
+  });
+});
+
+test('edits the daily goals through the dedicated screen', async () => {
+  let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(<App />);
+  });
+  await ReactTestRenderer.act(async () => {
+    await Promise.resolve();
+  });
+
+  // The home tile leads with the shipped defaults, and is the way into the
+  // goals screen.
+  expect(visibleText(renderer!)).toContain('0 / 1');
+  await press(renderer!, 'Open goals and preferences');
+  expect(visibleText(renderer!)).toContain('Goals & Preferences');
+
+  // A saved goal comes back with the user: the tile now measures against it,
+  // without touching the focus history or the task list.
+  await typeText(renderer!, 'Daily task goal', '5');
+  await press(renderer!, 'Save daily goals');
+  expect(visibleText(renderer!)).toContain('0 / 5');
 
   await ReactTestRenderer.act(async () => {
     renderer!.unmount();

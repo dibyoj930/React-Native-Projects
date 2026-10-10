@@ -3,7 +3,8 @@
 A **local-first React Native productivity app**: a task list with per-task focus
 timers, OS notifications, and a focus-session history with streaks and momentum.
 No backend, no accounts — every fact the app renders lives on the device, in
-memory or in one of three `AsyncStorage` keys.
+memory or under a small set of `AsyncStorage` keys (see
+[`docs/INTEGRATION.md`](docs/INTEGRATION.md) for the full list).
 
 <p align="center">
   <img src="docs/screenshots/home.png" width="250" alt="Home screen — today's goals, tags, streak and recent focus" />
@@ -29,6 +30,11 @@ memory or in one of three `AsyncStorage` keys.
   start focusing and edit.
 - Malformed stored data is repaired field-by-field on load: a bad field costs the
   field, never the task.
+- **Editable daily goals**: the home progress tile opens a dedicated **Goals &
+  Preferences** screen for setting task and focus targets, with a live preview of
+  today against them. Goals persist in their own key, survive restarts and the
+  "Clear focus history" reset, and drive a contextual, deterministic
+  encouragement line.
 
 ### Focus timers
 - A **per-task focus timer** with a duration picker (opens on 25 minutes).
@@ -52,8 +58,8 @@ memory or in one of three `AsyncStorage` keys.
 
 ### Progress on the home screen
 - **Momentum** — a one-line read on how today is going.
-- **Two daily goals** — focus time and tasks completed — against targets that
-  escalate with your streak.
+- **Two daily goals** — focus time and tasks completed — against the targets you
+  set in **Goals & Preferences**.
 - **Streak** — current, best, and remaining freezes.
 - **Recent focus** — a 7-day chart: tap a bar to fill it green and see that day's
   time and task count; a full bar is 12 hours of focus.
@@ -77,8 +83,9 @@ memory or in one of three `AsyncStorage` keys.
 - Accessibility labels on every control, with selected/disabled state exposed.
 
 ### Local-first & export
-- Everything persists to `AsyncStorage` under **three independent keys**
-  (`todos`, `productivity`, theme preference); clearing one never touches another.
+- Everything persists to `AsyncStorage` under a small set of independent keys
+  (tasks, productivity, theme preference, custom tags, and daily goals);
+  clearing one never touches another.
 - **Export/share** the task list as JSON from the home screen, named by the local
   day (never a UTC day).
 
@@ -165,14 +172,14 @@ Thin containers, dumb UI, and pure domain logic — see
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full model.
 
 ```
-App.tsx              providers + Screen navigation (home | tasks | tag | settings)
-WelcomeComponent     composition point for the four screens
+App.tsx              providers + Screen navigation (home | tasks | tag | goals | settings)
+WelcomeComponent     composition point for the five screens
 components/*         presentational screens and rows
 hooks/*              controllers (useTaskScreen, useSettings, useTimerOrchestration, …)
 todos/ productivity/ notifications/ domain + adapters (pure where it can be)
 ```
 
-- **No router and no state library** — four screens and one flat reducer are
+- **No router and no state library** — five screens and one flat reducer are
   enough; navigation is a single `Screen` union.
 - **One source of truth per fact** — the OS owns scheduled work, derived values
   are computed on read, and persistence sits behind a repository boundary.

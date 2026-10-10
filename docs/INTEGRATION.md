@@ -56,6 +56,7 @@ App.tsx
               deep-link effect     ← pressedTodoId → screen 'tasks'
               WelcomeComponent
                 useTaskScreen()    ← tasks + timers + productivity + task reminders
+                useDailyGoals()    ← targets shared by the home tile + goals screen
                 useSettings()      ← only while the Settings screen is mounted
 ```
 
@@ -63,7 +64,7 @@ Provider order is load-bearing and documented inline in `App.tsx`; do not
 reorder without reading that comment.
 
 Navigation is a single `Screen` union in `WelcomeComponent.tsx`
-(`home | tasks | tag | settings`) held in `AppContent`. There is no router.
+(`home | tasks | tag | goals | settings`) held in `AppContent`. There is no router.
 Android hardware back is registered in `AppContent` only while a sub-screen is
 up.
 
@@ -89,14 +90,16 @@ mocks the module to a no-op.
 
 ### AsyncStorage boundary
 
-Only three modules touch AsyncStorage. Each key is independent: clearing one
-never touches another.
+Only a handful of modules touch AsyncStorage. Each key is independent: clearing
+one never touches another.
 
 | Module | Key | Written by |
 | --- | --- | --- |
 | `todos/taskRepository.ts` | `todos` (`TODOS_STORAGE_KEY`) | `saveTodos` |
 | `productivity/storage.ts` | `@productivity/v1` | debounced `saveProductivity` |
 | `theme/ThemeProvider.tsx` | `@theme/preference` | the appearance control |
+| `todos/useCustomTags.ts` | `customTags` (`CUSTOM_TAGS_STORAGE_KEY`) | `addTag` |
+| `daily-goals/goalsStorage.ts` | `@daily-goals/v1` | `saveDailyGoals` |
 
 Every read is defensive: a missing key, non-array/non-object JSON, or a read
 failure returns empty/default state and logs, rather than throwing. A broken
@@ -126,6 +129,8 @@ Three independent AsyncStorage keys. Clearing one never touches another.
 | `todos` (`TODOS_STORAGE_KEY`) | `todos/taskRepository.ts` | `Todo[]` | `migrateTodos` |
 | `@productivity/v1` | `productivity/storage.ts` | `{ sessions, ledger, memory }` | per-field sanitising |
 | `@theme/preference` | `theme/ThemeProvider.tsx` | `'system' \| 'light' \| 'dark'` | falls back to `system` |
+| `customTags` (`CUSTOM_TAGS_STORAGE_KEY`) | `todos/useCustomTags.ts` | `string[]` | normalised, deduplicated, stripped |
+| `@daily-goals/v1` | `daily-goals/goalsStorage.ts` | `{ focusMinutes, tasksCompleted }` | field-by-field via `sanitizeGoals` |
 
 ### `todos`
 
@@ -155,8 +160,10 @@ addition fails.
 
 `{ sessions: FocusSession[], ledger: StreakLedger, memory: MomentumMemory }`.
 Open/active sessions are **never** persisted. `loadProductivity` sanitises every
-field independently; corrupt values degrade to safe defaults. Writes are
-debounced (`SAVE_DEBOUNCE_MS = 800`).
+field independently; corrupt values degrade to safe defaults. `@daily-goals/v1`
+lives under its own key and is repaired by `sanitizeGoals` on load (Settings →
+Clear focus history does not touch it). Writes are debounced
+(`SAVE_DEBOUNCE_MS = 800`) for productivity.
 
 ### `@theme/preference`
 
@@ -269,7 +276,8 @@ AppContent effect: pressedTodoId → setScreen({ name: 'tasks' }) → clearPress
 
 - `useTaskScreen.clearAllTasks` — cancels each timer, closes each session
   `stopped`, clears the list, notes activity. Reminders reconcile away.
-- `ProductivityProvider.resetProductivity` — wipes `@productivity/v1`
+- `ProductivityProvider.resetProductivity` — wipes `@productivity/v1`; goals
+  stored under `@daily-goals/v1` survive that reset.
   (sessions, ledger, memory); tasks untouched. Confirmed in `useSettings`.
 - Deleting a single task does its per-task cleanup in `useTaskScreen.deleteTodo`.
 
@@ -278,6 +286,21 @@ AppContent effect: pressedTodoId → setScreen({ name: 'tasks' }) → clearPress
 `useTaskScreen.exportTodos` builds the frozen payload in
 `taskRepository.buildExportPayload`, names it via the local day (not UTC), and
 opens the OS share sheet.
+
+### 6.8 Daily goals
+
+```
+TodayCard tap → WelcomeComponent onNavigate({ name: 'goals' })
+  → GoalsScreen (draft fields, preview via goalsProgress)
+      Save → onSave → useDailyGoals.setGoals(next)   (state + @daily-goals/v1)
+          → navigate home, tile re-renders against the new targets
+      Cancel / back / hardware back → navigate home, draft discarded
+```
+
+Goals live under their own AsyncStorage key (`@daily-goals/v1`,
+`sanitizeGoals`-repaired on load), so a save never touches `todos` or
+`@productivity/v1` — task completion and focus sessions are read-only inputs to
+the tile's progress math, never rewritten.
 
 ## 7. Testing integration
 

@@ -25,6 +25,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ProductivityDashboard } from './ProductivityDashboard';
 import { TodayCard } from './TodayCard';
+import type { DailyGoals } from '../daily-goals';
 import type { Todo } from '../todos/model';
 import { accentFor, normalizeTagInput, tintOf, type TagOption } from '../todos/tags';
 import { openCount } from '../todos/taskSelectors';
@@ -58,6 +59,10 @@ export type HomeScreenProps = {
   onAddTask: () => void;
   /** Opens the settings screen. */
   onOpenSettings: () => void;
+  /** The user's saved targets, shown on the progress tile. */
+  goals: DailyGoals;
+  /** Opens the Goals & Preferences screen. */
+  onOpenGoals: () => void;
   /** Shares the list as JSON. No-op when there is nothing to export. */
   onExport: () => void;
 };
@@ -71,6 +76,8 @@ export function HomeScreen({
   onAddTag,
   onAddTask,
   onOpenSettings,
+  goals,
+  onOpenGoals,
   onExport,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
@@ -187,8 +194,9 @@ export function HomeScreen({
 
         {/* Replaced a "3 of 7 tasks done" row, which counted every task ever
             added — including ones completed weeks ago — and so answered a
-            question nobody was asking. */}
-        <TodayCard />
+            question nobody was asking. The whole tile opens the Goals &
+            Preferences screen where its targets are edited. */}
+        <TodayCard goals={goals} onOpenGoals={onOpenGoals} />
 
         {/* Always here, between the two cards — and every tag is always here,
             not just the ones in use. A tag with nothing behind it opens an
