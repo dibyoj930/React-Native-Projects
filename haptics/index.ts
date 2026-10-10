@@ -21,7 +21,8 @@ export type HapticEvent =
   | 'taskCompleted'
   | 'taskUncompleted'
   | 'taskAdded'
-  | 'taskDeleted';
+  | 'taskDeleted'
+  | 'taskSwiped';
 
 /** Subset of the library's haptic types that this app uses. */
 type HapticType =
@@ -39,6 +40,8 @@ const HAPTIC_BY_EVENT: Record<HapticEvent, HapticType> = {
   taskUncompleted: 'impactLight',
   taskAdded: 'selection',
   taskDeleted: 'impactLight',
+  // A gesture rather than an outcome, so it is a tick, not a thud.
+  taskSwiped: 'selection',
 };
 
 /**
@@ -49,6 +52,7 @@ const FALLBACK_PATTERN: Record<HapticEvent, number | number[]> = {
   taskAdded: 10,
   taskUncompleted: 20,
   taskDeleted: 20,
+  taskSwiped: 15,
   // Two short pulses, mirroring a "success" notification.
   taskCompleted: [0, 30, 70, 30],
 };

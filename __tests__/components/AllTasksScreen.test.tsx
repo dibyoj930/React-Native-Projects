@@ -3,8 +3,8 @@
  *
  * The screen's whole job is showing the same tasks as home with less around them,
  * so several of these tests are about what it does *not* do: no progress card, no
- * focus graph, no export bar. What it adds is organisation — due-date groups, a
- * search box and a tag filter — and those have their own tests below.
+ * focus graph, no export bar. What it adds is organisation — due-date groups and
+ * a search box — and those have their own tests below.
  */
 
 import React from 'react';
@@ -329,54 +329,6 @@ describe('AllTasksScreen — search', () => {
       await typeText(renderer, 'Search tasks', 'Task b');
       await typeText(renderer, 'Search tasks', '');
       expect(visibleText(renderer)).toContain('row:Task a');
-    });
-  });
-});
-
-describe('AllTasksScreen — the tag filter', () => {
-  const tagged = [
-    todo({ id: 'a', tags: ['#coding'] }),
-    todo({ id: 'b', tags: ['#gym'] }),
-    todo({ id: 'c' }),
-  ];
-
-  it('offers a chip only for tags actually in use', async () => {
-    await withRendered(<AllTasksScreen {...props({ todos: tagged })} />, (renderer) => {
-      expect(labels(renderer)).toEqual(
-        expect.arrayContaining(['Filter by #coding', 'Filter by #gym']),
-      );
-      // #health is in the vocabulary but on nothing, so it is not offered.
-      expect(labels(renderer)).not.toContain('Filter by #health');
-    });
-  });
-
-  it('renders no chip row when nothing is tagged', async () => {
-    await withRendered(<AllTasksScreen {...props()} />, (renderer) => {
-      expect(labels(renderer).some((label) => label.startsWith('Filter by'))).toBe(false);
-    });
-  });
-
-  it('narrows the list to one tag and clears when tapped again', async () => {
-    await withRendered(<AllTasksScreen {...props({ todos: tagged })} />, async (renderer) => {
-      await press(renderer, 'Filter by #coding');
-      expect(visibleText(renderer)).toContain('row:Task a');
-      expect(visibleText(renderer)).not.toContain('row:Task b');
-      expect(visibleText(renderer)).not.toContain('row:Task c');
-
-      await press(renderer, 'Filter by #coding');
-      expect(visibleText(renderer)).toContain('row:Task b');
-    });
-  });
-
-  it('unions two selected tags rather than intersecting them', async () => {
-    await withRendered(<AllTasksScreen {...props({ todos: tagged })} />, async (renderer) => {
-      await press(renderer, 'Filter by #coding');
-      await press(renderer, 'Filter by #gym');
-      const text = visibleText(renderer);
-      expect(text).toContain('row:Task a');
-      expect(text).toContain('row:Task b');
-      // A task with neither tag is still excluded.
-      expect(text).not.toContain('row:Task c');
     });
   });
 });

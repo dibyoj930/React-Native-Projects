@@ -12,13 +12,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { Todo } from '../todos/model';
 import {
   filterByTag,
-  filterByTags,
   groupTodos,
   openCount,
   searchTodos,
-  tagsInUse,
 } from '../todos/taskSelectors';
-import { accentFor, tintOf } from '../todos/tags';
 import { useTheme } from '../theme/useTheme';
 import type { Theme } from '../theme/theme';
 
@@ -40,8 +37,8 @@ export type AllTasksScreenProps = {
    */
   title?: string;
   /**
-   * When set, only tasks carrying this tag are shown, and the search/tag filter
-   * bar is hidden — a tag view is already a filter.
+   * When set, only tasks carrying this tag are shown, and the search bar is
+   * hidden — a tag view is already a filter.
    *
    * The base list lives here rather than in the caller so the two variants cannot
    * drift: "all tasks" and "the #coding tasks" are one list with and without a
@@ -85,13 +82,13 @@ const INITIAL_RENDERED_CELLS = 30;
  * The tag row on home opens this screen with a `filterTag`, which then shows one
  * tag's tasks under that tag's heading. Unfiltered, the screen earns its keep by
  * organising rather than merely listing: tasks are grouped by due date — Overdue
- * first, then Today, Upcoming, no date, and Completed last — and a search box plus
- * a multi-select tag filter narrow the list from there.
+ * first, then Today, Upcoming, no date, and Completed last — and a search box
+ * narrows the list from there.
  *
- * The search text and the selected tags are view state, so they live here. What
- * each means — which tasks match a query, which tasks carry a tag, which group a
- * task falls into — is pure and lives in `todos/taskSelectors`, so the rules can
- * be tested without a renderer and this component stays a composition of them.
+ * The search text is view state, so it lives here. What it means — which tasks
+ * match a query, which tag a task carries, which group a task falls into — is
+ * pure and lives in `todos/taskSelectors`, so the rules can be tested without a
+ * renderer and this component stays a composition of them.
  */
 export function AllTasksScreen({
   todos,
@@ -106,36 +103,22 @@ export function AllTasksScreen({
   const insets = useSafeAreaInsets();
   const styles = useMemo(() => createStyles(t), [t]);
 
-  // View state: what the user has typed and which tag chips are lit. It is not
-  // domain state, so it does not belong in `useTaskScreen` — nothing outside this
-  // screen can observe or act on it.
+  // View state: what the user has typed. It is not domain state, so it does not
+  // belong in `useTaskScreen` — nothing outside this screen can observe or act
+  // on it.
   const [query, setQuery] = useState('');
-  const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
   // The tag view's slice, or the whole list. Filtering lives here rather than in
   // the caller so the two variants cannot drift.
   const base = useMemo(() => filterByTag(todos, filterTag), [filterTag, todos]);
 
-  const filtered = useMemo(() => {
-    // A tag view is already filtered, so the multi-select chips are skipped there
-    // rather than stacked on top and leaving the heading lying about what is up.
-    const byTags = filterTag ? base : filterByTags(base, selectedTags);
-    return searchTodos(byTags, query);
-  }, [base, filterTag, query, selectedTags]);
+  const filtered = useMemo(() => searchTodos(base, query), [base, query]);
 
   const sections = useMemo(() => groupTodos(filtered, today), [filtered, today]);
 
   // Counted over what is shown, not the whole list: the subtitle describes the
   // list under it.
   const open = openCount(filtered);
-
-  const tags = useMemo(() => tagsInUse(base), [base]);
-
-  const toggleTag = (tag: string) => {
-    setSelectedTags((current) =>
-      current.includes(tag) ? current.filter((chosen) => chosen !== tag) : [...current, tag],
-    );
-  };
 
   const subtitle =
     filtered.length === 0
@@ -207,46 +190,6 @@ export function AllTasksScreen({
               value={query}
             />
           </View>
-
-          {/* Only tags actually in use: a filter over eight vocabulary entries when
-              two tags exist is mostly dead buttons. Absent entirely when nothing is
-              tagged, so the unfiltered list keeps its old, uncluttered header. */}
-          {tags.length > 0 && (
-            <View style={styles.chipRow}>
-              {tags.map((tag) => {
-                const accent = accentFor(tag);
-                const active = selectedTags.includes(tag);
-                return (
-                  <TouchableOpacity
-                    key={tag}
-                    accessibilityLabel={`Filter by ${tag}`}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: active }}
-                    activeOpacity={0.7}
-                    onPress={() => toggleTag(tag)}
-                    style={[
-                      styles.filterChip,
-                      active
-                        ? { backgroundColor: accent, borderColor: accent }
-                        : {
-                            backgroundColor: tintOf(accent),
-                            borderColor: tintOf(accent),
-                          },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.filterChipText,
-                        { color: active ? t.colors.primaryText : accent },
-                      ]}
-                    >
-                      {tag}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          )}
         </View>
       )}
 
@@ -293,8 +236,7 @@ export function AllTasksScreen({
             <View style={styles.empty}>
               <Text style={styles.emptyTitle}>No matches</Text>
               <Text style={styles.emptyBody}>
-                Nothing here fits that search or tag filter. Clear it to see every
-                task again.
+                Nothing here fits that search. Clear it to see every task again.
               </Text>
             </View>
           ) : null
@@ -355,7 +297,7 @@ const createStyles = (t: Theme) => {
       backgroundColor: c.primary,
     },
     /**
-     * The search box and the tag filter, between the header and the list.
+     * The search box, between the header and the list.
      *
      * No rule under it: the header already closes the chrome with its own
      * hairline, and a second line directly above the first task read as a stray
@@ -379,21 +321,6 @@ const createStyles = (t: Theme) => {
       paddingVertical: 8,
       fontSize: 15,
       color: c.text,
-    },
-    chipRow: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 8,
-    },
-    filterChip: {
-      borderRadius: 12,
-      borderWidth: 1,
-      paddingHorizontal: 10,
-      paddingVertical: 6,
-    },
-    filterChipText: {
-      fontSize: 13,
-      fontWeight: '600',
     },
     sectionHeader: {
       fontSize: 13,

@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import MaterialCommunityIcons from '@react-native-vector-icons/material-design-icons';
 import Swipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
+import { triggerHaptic } from '../haptics';
 import { useTheme } from '../theme/useTheme';
 import type { Theme } from '../theme/theme';
 
@@ -90,6 +91,13 @@ export function SwipeableTodoRow({
       renderRightActions={renderRightActions}
       containerStyle={styles.swipeableContainer}
       childrenContainerStyle={styles.swipeableChildren}
+      onSwipeableWillOpen={(direction) => {
+        // `right` is the slider's language for "the right-side actions are
+        // revealing", which is what a left swipe does. A right swipe can't open
+        // the left side (no `renderLeftActions`), but keeping the check honest
+        // costs nothing and survives a future left actions row.
+        if (direction === 'right') triggerHaptic('taskSwiped');
+      }}
     >
       {children}
     </Swipeable>
@@ -100,22 +108,22 @@ const createStyles = (t: Theme) => {
   const c = t.colors;
   return StyleSheet.create({
     swipeableContainer: {
-      marginBottom: 8,
-      borderRadius: 8,
+      marginBottom: 12,
+      borderRadius: 12,
       overflow: 'hidden',
       // Backing colour for the revealed pane, so no light flash shows through
       // the rounded corners while the row is swiped.
       backgroundColor: c.surface,
     },
     swipeableChildren: {
-      borderRadius: 8,
+      borderRadius: 12,
     },
     actionsContainer: {
       flexDirection: 'row',
       alignItems: 'stretch',
       height: '100%',
-      borderTopRightRadius: 8,
-      borderBottomRightRadius: 8,
+      borderTopRightRadius: 12,
+      borderBottomRightRadius: 12,
       overflow: 'hidden',
     },
     action: {

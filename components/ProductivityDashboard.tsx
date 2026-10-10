@@ -44,6 +44,20 @@ export function ProductivityDashboard() {
   const { snapshot } = useProductivity();
   const { streak, recentDays } = snapshot;
 
+  // The day bars are sized against the window's own biggest focus day rather than
+  // an absolute "full bar" number. A twelve-hour anchor made every realistic week
+  // hug the baseline — an hour of focus read as an eighth of a bar — so bars now
+  // answer "how much of my best day is this?" and a consistent routine fills the
+  // chart instead of petering out at the bottom of it.
+  const maxFocusMinutes = useMemo(
+    () =>
+      recentDays.reduce(
+        (max, rollup) => Math.max(max, rollup.focusedSeconds / 60),
+        0,
+      ),
+    [recentDays],
+  );
+
   // Which bar is open. Null is the resting state: every day shows a pale bar
   // with no tip, and nothing is highlighted.
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
@@ -132,7 +146,11 @@ export function ProductivityDashboard() {
               {[...recentDays].reverse().map((rollup) => {
                 const isSelected = rollup.day === selectedDay;
                 const tipHeight = taskTipHeight(rollup.tasksCompleted);
-                const fillHeight = fillHeightPx(rollup.focusedSeconds, tipHeight);
+                const fillPercent = focusFillPercent(
+                  rollup.focusedSeconds,
+                  maxFocusMinutes,
+                );
+                const fillHeight = fillHeightPx(fillPercent, tipHeight);
                 const tasks = `${rollup.tasksCompleted} ${
                   rollup.tasksCompleted === 1 ? 'task' : 'tasks'
                 }`;
@@ -190,7 +208,7 @@ export function ProductivityDashboard() {
                           style={[
                             styles.journeyBarFill,
                             {
-                              height: `${focusFillPercent(rollup.focusedSeconds)}%`,
+                              height: `${fillPercent}%`,
                               backgroundColor: t.colors.focusBarIdle,
                             },
                           ]}
@@ -203,7 +221,7 @@ export function ProductivityDashboard() {
               })}
             </View>
             <Text style={styles.hint}>
-              {rangeLabel} · green fill is focus time, a full bar is 12 hours
+              {rangeLabel} · green fill is focus time, sized to your biggest focus day
             </Text>
           </>
         )}
@@ -238,21 +256,19 @@ function Fact({
   );
 }
 
-/** A full bar is twelve hours of focus — a day cannot hold more. */
-const FULL_BAR_MINUTES = 12 * 60;
-
 /**
- * Focus fill as a percentage of a full bar.
+ * Focus fill as a percentage of the window's tallest bar.
  *
  * The track is a fixed height and only the fill moves, so a day reads as "how
- * much of a full day did I focus" rather than "how big is this bar". Twelve
- * hours is the mark, so even a long session caps rather than flattening the week
- * beside it.
+ * much of my biggest focus day is this" rather than "how big is this bar".
+ * Sizing to the window's own maximum rather than an absolute number keeps the
+ * chart honest about a quiet week: bars compare a day against the user's actual
+ * routine, which is the question "have I been consistent?" is really asking.
  */
-function focusFillPercent(focusedSeconds: number): number {
+function focusFillPercent(focusedSeconds: number, maxFocusMinutes: number): number {
   const minutes = focusedSeconds / 60;
-  if (!(minutes > 0)) return 0;
-  return Math.min(100, (minutes / FULL_BAR_MINUTES) * 100);
+  if (!(minutes > 0) || !(maxFocusMinutes > 0)) return 0;
+  return Math.min(100, (minutes / maxFocusMinutes) * 100);
 }
 
 /**
@@ -261,8 +277,8 @@ function focusFillPercent(focusedSeconds: number): number {
  * The orange task tip sits above the green fill inside the same fixed track, so
  * a full day's green stops short to leave the cap room to sit.
  */
-function fillHeightPx(focusedSeconds: number, tipHeight: number): number {
-  const ratio = focusFillPercent(focusedSeconds) / 100;
+function fillHeightPx(percent: number, tipHeight: number): number {
+  const ratio = percent / 100;
   const room = BAR_TRACK_HEIGHT - tipHeight;
   return Math.max(0, Math.min(room, ratio * BAR_TRACK_HEIGHT));
 }

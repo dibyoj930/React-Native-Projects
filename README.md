@@ -8,7 +8,7 @@ memory or under a small set of `AsyncStorage` keys (see
 
 <p align="center">
   <img src="docs/screenshots/home.png" width="250" alt="Home screen — today's goals, tags, streak and recent focus" />
-  <img src="docs/screenshots/tasks.png" width="250" alt="Task list — grouped by due date, with search and tag filters" />
+  <img src="docs/screenshots/tasks.png" width="250" alt="Task list — grouped by due date, with search" />
   <img src="docs/screenshots/home-dark.png" width="250" alt="Home screen in dark mode" />
 </p>
 
@@ -25,7 +25,7 @@ memory or under a small set of `AsyncStorage` keys (see
   **due date**, and **due time**.
 - The list is **grouped by due date** — Overdue, Today, Upcoming, No date, and
   Completed last — so it reads as organised rather than merely listed.
-- **Search** across task text and **multi-tag filtering** from the list header.
+- **Search** across task text and notes from the list header.
 - **Swipe** a row for quick actions (complete / stop a running timer), or tap to
   start focusing and edit.
 - Malformed stored data is repaired field-by-field on load: a bad field costs the
@@ -62,7 +62,7 @@ memory or under a small set of `AsyncStorage` keys (see
   set in **Goals & Preferences**.
 - **Streak** — current, best, and remaining freezes.
 - **Recent focus** — a 7-day chart: tap a bar to fill it green and see that day's
-  time and task count; a full bar is 12 hours of focus.
+  time and task count; bars are sized to your biggest focus day.
 
 ### Tags
 - A built-in vocabulary plus **your own tags**, added right from the home screen.
