@@ -1,9 +1,27 @@
-import React, { useMemo } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { formatDayRange, useProductivity } from '../productivity';
+import { formatDayRange, formatDuration, formatWeekday, useProductivity } from '../productivity';
 import { useTheme } from '../theme/useTheme';
 import type { Theme } from '../theme/theme';
+
+/**
+ * Height of a bar track, in px.
+ *
+ * Shared between the style and the fill maths: the opened bar animates its
+ * height in points, so both have to agree on how tall a full track is.
+ */
+const BAR_TRACK_HEIGHT = 64;
+
+/**
+ * Width of a bar, in px.
+ *
+ * Each bar sits in a `flex: 1` column, so a full-width track stretches to
+ * whatever share of the panel that column gets — a slab per day, seven times
+ * over. A fixed, centred width keeps the seven columns evenly spaced while the
+ * sticks themselves stay thin.
+ */
+const BAR_WIDTH = 16;
 
 /**
  * History: the streak and the day-wise focus chart.
@@ -26,10 +44,29 @@ export function ProductivityDashboard() {
   const { snapshot } = useProductivity();
   const { streak, recentDays } = snapshot;
 
-  // Names the span the bars cover. The bars themselves are labelled with bare
-  // day numbers — 14 columns are too narrow for `Mar 6` and anything wider
-  // would truncate — so without this a window straddling a month reads
-  // `28 1 2` with no way to tell which month the `1` belongs to.
+  // Which bar is open. Null is the resting state: every day shows a pale bar
+  // with no tip, and nothing is highlighted.
+  const [selectedDay, setSelectedDay] = useState<string | null>(null);
+
+  // Only one bar is open at a time, so a single value drives its grow-in. It is
+  // reset and replayed on every selection change, which is what makes each tap
+  // fill afresh instead of snapping to the new bar already full. Layout effect
+  // so the reset lands before the frame paints, or the just-opened bar would
+  // flash full for one frame.
+  const grow = useRef(new Animated.Value(0)).current;
+  useLayoutEffect(() => {
+    grow.setValue(0);
+    if (selectedDay === null) return;
+    Animated.timing(grow, {
+      toValue: 1,
+      duration: 280,
+      useNativeDriver: false,
+    }).start();
+  }, [grow, selectedDay]);
+
+  // Names the span the bars cover. The columns carry weekday names — `Mon`,
+  // `Tue` — which read as *when* but not as which month, so a window straddling
+  // a month boundary still needs this to anchor it.
   const rangeLabel =
     recentDays.length > 1
       ? formatDayRange(recentDays[0].day, recentDays[recentDays.length - 1].day)
@@ -39,19 +76,32 @@ export function ProductivityDashboard() {
     <View style={styles.panel}>
       <View style={styles.block}>
         <Text style={styles.sectionLabel}>Streak</Text>
-        <View style={styles.streakRow}>
-          <Stat
-            value={String(streak.current)}
-            caption={streak.current === 1 ? 'day' : 'days'}
-            styles={styles}
-          />
-          <Stat value={String(streak.longest)} caption="best" styles={styles} />
-          <Stat
-            value={String(streak.freezesRemaining)}
-            caption={streak.freezesRemaining === 1 ? 'freeze' : 'freezes'}
-            styles={styles}
-            accent={streak.freezesRemaining > 0}
-          />
+        {/* A tile rather than a row of three equal numbers. The current streak is
+            the number anyone opens this panel to check, so it is the only one
+            given size and it leads; best and freezes are context, set beside it
+            at a smaller weight. All three used to sit at 22px, which made a
+            reader compare them to work out which one was "now". */}
+        <View style={styles.streakTile}>
+          <View style={styles.streakHero}>
+            <Text style={styles.streakFlame}>{streak.current > 0 ? '🔥' : '🌱'}</Text>
+            <View style={styles.streakHeroText}>
+              <Text style={styles.streakHeroValue}>
+                {streak.current} {streak.current === 1 ? 'day' : 'days'}
+              </Text>
+              <Text style={styles.streakHeroLabel}>current streak</Text>
+            </View>
+          </View>
+
+          <View style={styles.streakFacts}>
+            <Fact value={String(streak.longest)} label="best" styles={styles} />
+            <View style={styles.factDivider} />
+            <Fact
+              value={String(streak.freezesRemaining)}
+              label={streak.freezesRemaining === 1 ? 'freeze' : 'freezes'}
+              styles={styles}
+              accent={streak.freezesRemaining > 0}
+            />
+          </View>
         </View>
       </View>
 
@@ -69,34 +119,91 @@ export function ProductivityDashboard() {
               {/*
                 Reversed for render. `recentDays` is newest-first, which is the
                 right contract for a "recent" list but the wrong one for a time
-                axis: mapped in array order the bars ran today → 13 days ago, so
-                the dates read 06 05 04 03 02 01 28 and time appeared to travel
-                backwards. A chart's x-axis runs oldest → newest like every
-                calendar, so the direction is fixed here rather than by changing
-                the selector and its tests.
+                axis: mapped in array order the bars ran today → six days ago,
+                so the dates read 06 05 04 03 02 01 28 and time appeared to
+                travel backwards. A chart's x-axis runs oldest → newest like
+                every calendar, so the direction is fixed here rather than by
+                changing the selector and its tests.
+
+                Each column is a tap target. At rest every day shows a pale bar;
+                tapping one grows it back to solid green, wakes the orange task
+                tip above the fill, and adds the task count beside the time.
               */}
-              {[...recentDays].reverse().map((rollup) => (
-                <View key={rollup.day} style={styles.journeyColumn}>
-                  <View style={styles.journeyBarTrack}>
-                    <View
-                      style={[
-                        styles.journeyBarFill,
-                        {
-                          height: `${barHeightPercent(rollup.focusedSeconds)}%`,
-                          backgroundColor: rollup.isFocusCompleted
-                            ? t.colors.primary
-                            : t.colors.textMuted,
-                        },
-                      ]}
-                    />
-                  </View>
-                  <Text style={styles.journeyLabel}>{dayLabel(rollup.day)}</Text>
-                </View>
-              ))}
+              {[...recentDays].reverse().map((rollup) => {
+                const isSelected = rollup.day === selectedDay;
+                const tipHeight = taskTipHeight(rollup.tasksCompleted);
+                const fillHeight = fillHeightPx(rollup.focusedSeconds, tipHeight);
+                const tasks = `${rollup.tasksCompleted} ${
+                  rollup.tasksCompleted === 1 ? 'task' : 'tasks'
+                }`;
+
+                return (
+                  <Pressable
+                    key={rollup.day}
+                    style={styles.journeyColumn}
+                    onPress={() => setSelectedDay(isSelected ? null : rollup.day)}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected: isSelected }}
+                    accessibilityLabel={`${formatWeekday(rollup.day)}, ${formatDuration(
+                      rollup.focusedSeconds,
+                    )}, ${tasks}`}
+                  >
+                    <View style={styles.journeyValueZone}>
+                      <Text style={styles.journeyValue} numberOfLines={1}>
+                        {formatDuration(rollup.focusedSeconds)}
+                      </Text>
+                      {isSelected && (
+                        <Text style={styles.journeyTask} numberOfLines={1}>
+                          {tasks}
+                        </Text>
+                      )}
+                    </View>
+                    <View style={styles.journeyBarTrack}>
+                      {isSelected ? (
+                        <>
+                          {tipHeight > 0 && (
+                            <View
+                              style={[styles.journeyTip, { height: tipHeight }]}
+                            />
+                          )}
+                          <Animated.View
+                            style={[
+                              styles.journeyBarFill,
+                              {
+                                height: grow.interpolate({
+                                  inputRange: [0, 1],
+                                  outputRange: [0, fillHeight],
+                                }),
+                                backgroundColor: grow.interpolate({
+                                  inputRange: [0, 1],
+                                  outputRange: [
+                                    t.colors.focusBarIdle,
+                                    t.colors.focusBar,
+                                  ],
+                                }),
+                              },
+                            ]}
+                          />
+                        </>
+                      ) : (
+                        <View
+                          style={[
+                            styles.journeyBarFill,
+                            {
+                              height: `${focusFillPercent(rollup.focusedSeconds)}%`,
+                              backgroundColor: t.colors.focusBarIdle,
+                            },
+                          ]}
+                        />
+                      )}
+                    </View>
+                    <Text style={styles.journeyLabel}>{formatWeekday(rollup.day)}</Text>
+                  </Pressable>
+                );
+              })}
             </View>
             <Text style={styles.hint}>
-              {rangeLabel} · taller bars are more focus, filled bars closed a
-              task
+              {rangeLabel} · green fill is focus time, a full bar is 12 hours
             </Text>
           </>
         )}
@@ -105,49 +212,70 @@ export function ProductivityDashboard() {
   );
 }
 
-function Stat({
+/**
+ * One secondary streak figure: the number, then what it counts.
+ *
+ * `best` and `freezes` are labels rather than sentences, so they read as the
+ * two footnotes to the hero streak beside them rather than as a second and
+ * third thing to compare against it.
+ */
+function Fact({
   value,
-  caption,
+  label,
   styles,
   accent = false,
 }: {
   value: string;
-  caption: string;
+  label: string;
   styles: ReturnType<typeof createStyles>;
   accent?: boolean;
 }) {
   return (
-    <View style={styles.stat}>
-      <Text style={[styles.statValue, accent && styles.statValueAccent]}>{value}</Text>
-      <Text style={styles.statCaption}>{caption}</Text>
+    <View style={styles.fact}>
+      <Text style={[styles.factValue, accent && styles.factValueAccent]}>{value}</Text>
+      <Text style={styles.factLabel}>{label}</Text>
     </View>
   );
 }
 
+/** A full bar is twelve hours of focus — a day cannot hold more. */
+const FULL_BAR_MINUTES = 12 * 60;
+
 /**
- * Bar height as a percentage, scaled against a 90-minute day.
+ * Focus fill as a percentage of a full bar.
  *
- * Capped so one very long day cannot flatten every other bar to nothing — the
- * point of the chart is comparison between days, and a single 6-hour outlier
- * would destroy that.
+ * The track is a fixed height and only the fill moves, so a day reads as "how
+ * much of a full day did I focus" rather than "how big is this bar". Twelve
+ * hours is the mark, so even a long session caps rather than flattening the week
+ * beside it.
  */
-function barHeightPercent(focusedSeconds: number): number {
+function focusFillPercent(focusedSeconds: number): number {
   const minutes = focusedSeconds / 60;
-  if (minutes <= 0) return 2;
-  return Math.min(100, Math.max(6, (minutes / 90) * 100));
+  if (!(minutes > 0)) return 0;
+  return Math.min(100, (minutes / FULL_BAR_MINUTES) * 100);
 }
 
 /**
- * `2026-05-04` -> `4`. The day of the month.
+ * Fill height, in px, for the opened bar.
  *
- * This was a month *letter*, which collided: a two-week window routinely spans
- * two months, so the strip could render `A A` and give the user no way to tell
- * which day either bar was. Day numbers are unique across any window shorter than
- * four weeks, and they actually say when the focus happened.
+ * The orange task tip sits above the green fill inside the same fixed track, so
+ * a full day's green stops short to leave the cap room to sit.
  */
-function dayLabel(day: string): string {
-  const [, , dayOfMonth] = day.split('-');
-  return dayOfMonth ?? '';
+function fillHeightPx(focusedSeconds: number, tipHeight: number): number {
+  const ratio = focusFillPercent(focusedSeconds) / 100;
+  const room = BAR_TRACK_HEIGHT - tipHeight;
+  return Math.max(0, Math.min(room, ratio * BAR_TRACK_HEIGHT));
+}
+
+/**
+ * Orange tip height, in px, from the tasks closed that day.
+ *
+ * None at zero; otherwise ~3px per task, capped so a very productive day cannot
+ * overflow the track it sits in.
+ */
+function taskTipHeight(tasksCompleted: number): number {
+  if (!(tasksCompleted > 0)) return 0;
+  return Math.min(12, tasksCompleted * 3);
 }
 
 const createStyles = (t: Theme) =>
@@ -155,12 +283,12 @@ const createStyles = (t: Theme) =>
     panel: {
       borderRadius: 16,
       padding: 16,
-      // Breathing room between the last task row and the panel above it.
-      marginTop: 20,
-      // Section gap to the Tags block, which follows in the list footer. Larger
-      // than the internal divider spacing on purpose: this separates two
-      // unrelated features, where a hairline only separates two parts of one.
-      marginBottom: 32,
+      // Breathing room between the tags block above and this history panel.
+      marginTop: 12,
+      // Section gap to whatever follows. Kept larger than the internal divider
+      // spacing on purpose: this separates two unrelated features, where a
+      // hairline only separates two parts of one.
+      marginBottom: 24,
       backgroundColor: t.colors.surface,
       borderWidth: t.mode === 'dark' ? StyleSheet.hairlineWidth : 0,
       borderColor: t.colors.border,
@@ -181,54 +309,128 @@ const createStyles = (t: Theme) =>
       gap: 10,
     },
 
-    streakRow: {
+    /**
+     * The streak tile.
+     *
+     * `surfaceMuted` rather than the panel's own `surface`, so it lifts off the
+     * card without a border — the same raised-panel treatment used elsewhere.
+     */
+    streakTile: {
       flexDirection: 'row',
-      justifyContent: 'space-between',
-    },
-    stat: {
       alignItems: 'center',
-      flex: 1,
+      justifyContent: 'space-between',
+      gap: 12,
+      backgroundColor: t.colors.surfaceMuted,
+      borderRadius: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 14,
     },
-    statValue: {
+    streakHero: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      flexShrink: 1,
+    },
+    streakFlame: {
+      fontSize: 22,
+    },
+    streakHeroText: {
+      gap: 1,
+    },
+    streakHeroValue: {
       color: t.colors.text,
       fontSize: 22,
       fontWeight: '700',
       fontVariant: ['tabular-nums'],
     },
-    statValueAccent: {
-      color: t.colors.primary,
-    },
-    statCaption: {
+    streakHeroLabel: {
       color: t.colors.textMuted,
       fontSize: 11,
+    },
+    streakFacts: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+    },
+    fact: {
+      alignItems: 'center',
+    },
+    factValue: {
+      color: t.colors.text,
+      fontSize: 15,
+      fontWeight: '700',
+      fontVariant: ['tabular-nums'],
+    },
+    factValueAccent: {
+      color: t.colors.primary,
+    },
+    factLabel: {
+      color: t.colors.textMuted,
+      fontSize: 11,
+    },
+    /** Hairline between the two secondary figures, not around them. */
+    factDivider: {
+      width: StyleSheet.hairlineWidth,
+      alignSelf: 'stretch',
+      backgroundColor: t.colors.border,
     },
 
     journeyBars: {
       flexDirection: 'row',
       alignItems: 'flex-end',
-      height: 76,
-      gap: 3,
+      gap: 6,
     },
     journeyColumn: {
       flex: 1,
       alignItems: 'center',
       gap: 4,
     },
+    /**
+     * Fixed two-line zone above each bar.
+     *
+     * The opened bar grows a second line (the task count); reserving room for
+     * both lines on every column keeps the tracks from shifting out of line when
+     * a bar opens.
+     */
+    journeyValueZone: {
+      height: 26,
+      alignSelf: 'stretch',
+      alignItems: 'center',
+    },
+    journeyValue: {
+      color: t.colors.textMuted,
+      fontSize: 10,
+      lineHeight: 12,
+      fontVariant: ['tabular-nums'],
+    },
+    journeyTask: {
+      color: t.colors.focusTip,
+      fontSize: 10,
+      lineHeight: 12,
+      fontWeight: '600',
+      fontVariant: ['tabular-nums'],
+    },
     journeyBarTrack: {
-      width: '100%',
-      flex: 1,
+      width: BAR_WIDTH,
+      height: BAR_TRACK_HEIGHT,
       justifyContent: 'flex-end',
-      borderRadius: 3,
+      borderRadius: 4,
       overflow: 'hidden',
       backgroundColor: t.colors.progressTrack,
     },
     journeyBarFill: {
       width: '100%',
-      borderRadius: 3,
+      borderRadius: 4,
+    },
+    journeyTip: {
+      width: '100%',
+      borderTopLeftRadius: 4,
+      borderTopRightRadius: 4,
+      backgroundColor: t.colors.focusTip,
     },
     journeyLabel: {
       color: t.colors.textMuted,
-      fontSize: 9,
+      fontSize: 11,
     },
 
     hint: {

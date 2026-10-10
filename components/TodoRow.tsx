@@ -148,42 +148,52 @@ export function TodoRow({
             </Text>
           )}
 
-          {dueLabel && !todo.completed && (
-            <View style={styles.metaLine}>
-              <MaterialCommunityIcons
-                name="calendar-blank-outline"
-                size={12}
-                color={overdue ? t.colors.danger : t.colors.textMuted}
-              />
-              <Text style={[styles.dueText, overdue && styles.dueTextOverdue]}>
-                {dueLabel}
-              </Text>
-            </View>
-          )}
+          {/* Due date, timer and lock share one row. They were three separate
+              rows, so a task with a date and a running timer spent two sparse
+              lines on two short facts and pushed the row's real content — the
+              title — away from its tags. They are rare together, so the row
+              collapses to nothing when none applies, and each keeps its own
+              spacing so a lone item is not padded out to look grouped.
 
-          {hasTimer && (
+              The lock badge is the reason the checkbox above stops responding;
+              without it a finished timer reads as a broken tap, so it belongs on
+              the same line as the date and timer it explains. */}
+          {((dueLabel && !todo.completed) || hasTimer || isLocked) && (
             <View style={styles.metaLine}>
-              <MaterialCommunityIcons
-                name={isRunning ? 'timer-sand' : 'timer-off-outline'}
-                size={14}
-                color={t.colors.textMuted}
-              />
-              <Text style={styles.timerText}>{timerLabel}</Text>
-            </View>
-          )}
+              {dueLabel && !todo.completed && (
+                <View style={styles.metaItem}>
+                  <MaterialCommunityIcons
+                    name="calendar-blank-outline"
+                    size={12}
+                    color={overdue ? t.colors.danger : t.colors.textMuted}
+                  />
+                  <Text style={[styles.dueText, overdue && styles.dueTextOverdue]}>
+                    {dueLabel}
+                  </Text>
+                </View>
+              )}
 
-          {/* A finished timer locks this task closed. The checkbox above then
-              stops responding, which on its own reads as a broken tap rather
-              than a deliberate rule — this is the reason, shown next to the
-              task it applies to. */}
-          {isLocked && (
-            <View style={styles.metaLine}>
-              <MaterialCommunityIcons
-                name="lock-check-outline"
-                size={12}
-                color={t.colors.primary}
-              />
-              <Text style={styles.lockText}>focus session ended</Text>
+              {hasTimer && (
+                <View style={styles.metaItem}>
+                  <MaterialCommunityIcons
+                    name={isRunning ? 'timer-sand' : 'timer-off-outline'}
+                    size={14}
+                    color={t.colors.textMuted}
+                  />
+                  <Text style={styles.timerText}>{timerLabel}</Text>
+                </View>
+              )}
+
+              {isLocked && (
+                <View style={styles.metaItem}>
+                  <MaterialCommunityIcons
+                    name="lock-check-outline"
+                    size={12}
+                    color={t.colors.primary}
+                  />
+                  <Text style={styles.lockText}>focus session ended</Text>
+                </View>
+              )}
             </View>
           )}
 
@@ -281,7 +291,8 @@ const createStyles = (t: Theme) => {
       flexDirection: 'row',
       justifyContent: 'space-between',
       alignItems: 'center',
-      padding: 12,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
       backgroundColor: c.surface,
     },
     /**
@@ -360,14 +371,22 @@ const createStyles = (t: Theme) => {
     /**
      * Shared by the due date, the timer readout and the lock badge.
      *
-     * These three are mutually exclusive in practice — a locked task's timer has
-     * ended — but they share one rule rather than three copies of it, so they
-     * cannot end up with different spacing.
+     * These three now share one physical row rather than one rule each, so a task
+     * with a date and a timer costs a single line. `gap` separates the groups
+     * (date | timer | lock); `metaItem` holds each group's icon tight to its own
+     * text, so the wider gap reads as "different facts" rather than letter
+     * spacing.
      */
     metaLine: {
       flexDirection: 'row',
+      flexWrap: 'wrap',
       alignItems: 'center',
-      marginTop: 4,
+      marginTop: 5,
+      gap: 12,
+    },
+    metaItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
       gap: 4,
     },
     dueText: {
@@ -423,15 +442,15 @@ const createStyles = (t: Theme) => {
     },
     actionButton: {
       color: c.primary,
-      fontSize: 16,
-      marginHorizontal: 8,
+      fontSize: 15,
+      marginHorizontal: 4,
     },
     taskTagsContainer: {
       flexDirection: 'row',
       flexWrap: 'wrap',
       alignItems: 'center',
       gap: 6,
-      marginTop: 6,
+      marginTop: 4,
     },
     taskTagChip: {
       borderRadius: 10,

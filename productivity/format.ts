@@ -129,6 +129,20 @@ function weekdayIndexFor(day: string): number | null {
   return ((offset + 4) % 7 + 7) % 7;
 }
 
+/**
+ * A day key as a weekday name — `Sun`, `Mon`, … Empty string if unparseable.
+ *
+ * The recent-focus chart labels each column with this rather than a bare day
+ * number: seven consecutive days are seven distinct weekdays, so the name is
+ * unique across the window *and* says when at a glance. It rides the same
+ * timezone-free arithmetic as `formatDueLabel` — no `Date` is constructed, so no
+ * clock can shift which day a column claims to be.
+ */
+export function formatWeekday(day: string): string {
+  const index = weekdayIndexFor(day);
+  return index === null ? '' : WEEKDAYS[index];
+}
+
 /** A day key as `Mar 6`. Empty string if unparseable. */
 function formatShortDate(day: string): string {
   const parsed = parseDayKey(day);

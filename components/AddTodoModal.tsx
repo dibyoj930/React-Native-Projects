@@ -22,8 +22,14 @@ import {
   todayKey,
   type DayKey,
 } from '../productivity';
-import { AVAILABLE_TAGS, accentFor, textOnAccent, tintOf } from '../todos/tags';
+import { AVAILABLE_TAGS, accentFor, textOnAccent, tintOf, type TagOption } from '../todos/tags';
 import type { Todo, TodoDraft } from '../todos/model';
+import {
+  formatTimeLabel,
+  isValidTimeKey,
+  timeKeyFromDate,
+  type TimeKey,
+} from '../todos/timeKey';
 import { useTheme } from '../theme/useTheme';
 import type { Theme } from '../theme/theme';
 
@@ -48,6 +54,15 @@ export type AddTodoModalProps = {
    */
   defaultTag?: string;
   /**
+   * The tag vocabulary the `#` picker offers.
+   *
+   * Defaults to the shipped list so the sheet is self-contained anywhere it is
+   * opened. The app passes the merged list — the shipped tags plus the user's
+   * own — so a tag created on home is immediately usable on a task, and the
+   * prefill check below recognises it as one the sheet can render.
+   */
+  tags?: readonly TagOption[];
+  /**
    * The task being edited, or absent for a new one.
    *
    * One sheet for both jobs rather than a second edit form. They are the same three
@@ -65,7 +80,8 @@ const MAX_YEARS_AHEAD = 5;
 type Styles = ReturnType<typeof createStyles>;
 
 /**
- * Create or edit a task: title, optional notes, optional date — and one optional tag.
+ * Create or edit a task: title, optional notes, optional date and time — and one
+ * optional tag.
  *
  * This replaces the single-line `TextInput` that used to sit in the header, rather
  * than sitting beside it. Two creation paths would mean two things to keep working
@@ -89,6 +105,7 @@ export function AddTodoModal({
   onClose,
   onSubmit,
   defaultTag,
+  tags = AVAILABLE_TAGS,
   task,
 }: AddTodoModalProps) {
   const t = useTheme();
@@ -97,7 +114,9 @@ export function AddTodoModal({
   const [text, setText] = useState('');
   const [notes, setNotes] = useState('');
   const [dueDate, setDueDate] = useState<DayKey | undefined>(undefined);
+  const [dueTime, setDueTime] = useState<TimeKey | undefined>(undefined);
   const [showPicker, setShowPicker] = useState(false);
+  const [showTimePicker, setShowTimePicker] = useState(false);
   // `tagLabel` rather than `tag`: the chip loop below binds `tag` to each available
   // tag in turn, and a state variable of the same name would be shadowed by it.
   const [tagLabel, setTagLabel] = useState<string | null>(null);
@@ -133,15 +152,17 @@ export function AddTodoModal({
     setText(task?.text ?? '');
     setNotes(task?.notes ?? '');
     setDueDate(task?.dueDate);
+    setDueTime(task?.dueTime);
     setShowPicker(false);
-    // Only a vocabulary tag can prefill: a chip row shows chips, and a stored
-    // label that no longer exists in the vocabulary is shown nowhere. Leaving it
+    setShowTimePicker(false);
+    // Only a tag the chip row can show may prefill: a stored label that is no
+    // longer in the (shipped + user) vocabulary is shown nowhere, so leaving it
     // out keeps the edit form honest — the caller side of the merge keeps the
     // task's old tag intact when the draft has no new one.
     const storedTag = task?.tags?.[0];
     setTagLabel(
       task
-        ? AVAILABLE_TAGS.some((available) => available.label === storedTag)
+        ? tags.some((available) => available.label === storedTag)
           ? storedTag ?? null
           : null
         : defaultTag ?? null,
@@ -156,8 +177,9 @@ export function AddTodoModal({
     // `task` is stable while the sheet is open: it comes from the same `todos`
     // array, which only changes on submit, so this does not refire under the
     // once-a-second timer re-render. `defaultTag` only changes with the screen,
-    // which cannot happen while a sheet covers it.
-  }, [visible, task, defaultTag]);
+    // which cannot happen while a sheet covers it. `tags` is the merged list and
+    // changes only when a tag is added, which also cannot happen under the sheet.
+  }, [visible, task, defaultTag, tags]);
 
   const canSubmit = text.trim().length > 0;
 
@@ -171,11 +193,12 @@ export function AddTodoModal({
       // saved as a note the user never wrote.
       notes: notes.trim().length > 0 ? notes.trim() : undefined,
       dueDate,
+      dueTime,
       // One tag or none, whichever the `#` control ends on. `undefined` means the
       // caller keeps whatever the task already had; a label means it replaces it.
       tag: tagLabel ?? undefined,
     });
-  }, [canSubmit, dueDate, notes, onSubmit, tagLabel, text]);
+  }, [canSubmit, dueDate, dueTime, notes, onSubmit, tagLabel, text]);
 
   /**
    * The user settled on a date.
@@ -201,6 +224,24 @@ export function AddTodoModal({
     // dismiss, and so never calls this: the calendar stays open for browsing and is
     // closed by tapping the date row again.
     setShowPicker(false);
+  }, []);
+
+  /**
+   * The user settled on a reminder time.
+   *
+   * A time with no date could never fire — there is no day to attach it to — so
+   * picking one defaults the day to today. That keeps the control's promise (a
+   * time is enough to get a reminder) without a time silently going nowhere.
+   */
+  const handleTimeChange = useCallback((_event: DateTimePickerChangeEvent, date: Date) => {
+    setDueTime(timeKeyFromDate(date));
+    setDueDate((current) => current ?? todayKey());
+  }, []);
+
+  const handleTimePickerDismiss = useCallback(() => {
+    // Same Android dialog semantics as the date picker: it closes itself after
+    // either outcome, so hiding here never discards a time already chosen.
+    setShowTimePicker(false);
   }, []);
 
   return (
@@ -321,7 +362,7 @@ export function AddTodoModal({
 
             {tagOpen && (
               <View style={styles.tagChips}>
-                {AVAILABLE_TAGS.map((tag) => {
+                {tags.map((tag) => {
                   const selected = tagLabel === tag.label;
                   return (
                     <TouchableOpacity
@@ -362,7 +403,7 @@ export function AddTodoModal({
           </Field>
 
           <Field
-            hint="Optional. A day, not a deadline time."
+            hint="Optional. The day a reminder is for."
             label="Date"
             styles={styles}
           >
@@ -392,7 +433,11 @@ export function AddTodoModal({
                 accessibilityRole="button"
                 onPress={() => {
                   setDueDate(undefined);
+                  // A time without a day has nothing to fire on, so clearing the
+                  // date clears the reminder time with it.
+                  setDueTime(undefined);
                   setShowPicker(false);
+                  setShowTimePicker(false);
                 }}
                 style={styles.clearDate}
               >
@@ -419,6 +464,61 @@ export function AddTodoModal({
               // so force it (iOS only; Android's dialog reads the app appearance).
               themeVariant={t.mode}
               value={localDateFromDayKey(dueDate ?? today)}
+            />
+          )}
+
+          <Field
+            hint="Optional. A reminder will pop at this date and time."
+            label="Time"
+            styles={styles}
+          >
+            <TouchableOpacity
+              accessibilityLabel={
+                dueTime
+                  ? `Reminder time, ${formatTimeLabel(dueTime)}. Tap to change.`
+                  : 'Add a reminder time'
+              }
+              accessibilityRole="button"
+              onPress={() => setShowTimePicker((open) => !open)}
+              style={styles.dateRow}
+            >
+              <MaterialCommunityIcons
+                color={dueTime ? t.colors.primary : t.colors.textMuted}
+                name="clock-outline"
+                size={18}
+              />
+              <Text style={[styles.dateText, !dueTime && styles.dateTextEmpty]}>
+                {dueTime ? formatTimeLabel(dueTime) : 'Add a time'}
+              </Text>
+            </TouchableOpacity>
+
+            {dueTime && (
+              <TouchableOpacity
+                accessibilityLabel="Remove reminder time"
+                accessibilityRole="button"
+                onPress={() => {
+                  setDueTime(undefined);
+                  setShowTimePicker(false);
+                }}
+                style={styles.clearDate}
+              >
+                <Text style={styles.clearDateText}>Remove time</Text>
+              </TouchableOpacity>
+            )}
+          </Field>
+
+          {showTimePicker && (
+            <DateTimePicker
+              // The date picker's inline calendar has no time dial, so the time
+              // gets its own control. Android opens its own dialog and ignores
+              // `display`; iOS shows the spinner under the Time field.
+              accentColor={t.colors.primary}
+              display={Platform.OS === 'ios' ? 'spinner' : 'default'}
+              mode="time"
+              onDismiss={handleTimePickerDismiss}
+              onValueChange={handleTimeChange}
+              themeVariant={t.mode}
+              value={timeAsDate(dueTime)}
             />
           )}
         </ScrollView>
@@ -470,6 +570,22 @@ function Field({
  */
 function labelFor(day: DayKey, today: DayKey): string {
   return formatDueLabel(day, today) || day;
+}
+
+/**
+ * The `Date` a `DateTimePicker` needs to show a stored time.
+ *
+ * The time picker reads only hours and minutes, so the date part is irrelevant;
+ * seeding it from "now" keeps the dial near where the user probably is. When a
+ * time is already set, its own hour and minute replace today's.
+ */
+function timeAsDate(key: TimeKey | undefined): Date {
+  const date = new Date();
+  if (isValidTimeKey(key)) {
+    const [hours, minutes] = key.split(':').map(Number);
+    date.setHours(hours, minutes, 0, 0);
+  }
+  return date;
 }
 
 const createStyles = (t: Theme) => {

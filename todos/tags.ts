@@ -27,6 +27,9 @@
 
 import type { Theme } from '../theme/theme';
 
+/** One entry in the tag vocabulary: the label and the hue it is drawn in. */
+export type TagOption = { label: string; accent: string };
+
 export const AVAILABLE_TAGS = [
   { label: '#architecture', accent: '#AF52DE' },
   { label: '#coding', accent: '#0A84FF' },
@@ -46,7 +49,88 @@ const TAG_ACCENTS: Record<string, string> = AVAILABLE_TAGS.reduce(
   {} as Record<string, string>,
 );
 
-export const accentFor = (tag: string): string => TAG_ACCENTS[tag] ?? '#007AFF';
+/**
+ * The hues a user-made tag can land on.
+ *
+ * A user tag is stored as its label alone, so its colour has to be *derived*
+ * rather than picked and remembered. Hashing the label into this palette keeps
+ * that derivation stable: every surface that colours the tag — the row, the
+ * home index, the filter — computes the same hue without storing a second copy
+ * of the vocabulary beside the first.
+ */
+const CUSTOM_TAG_ACCENTS = [
+  '#AF52DE',
+  '#0A84FF',
+  '#FF9F0A',
+  '#30D158',
+  '#FF375F',
+  '#64D2FF',
+  '#BF5AF2',
+  '#FFD60A',
+];
+
+/** A small, stable string hash, so one label always lands on one hue. */
+const hashString = (value: string): number => {
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    // eslint-disable-next-line no-bitwise
+    hash = (hash * 31 + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash);
+};
+
+/** True for a tag that ships with the app, as opposed to one the user added. */
+export const isVocabularyTag = (tag: string): boolean => tag in TAG_ACCENTS;
+
+export const accentFor = (tag: string): string =>
+  TAG_ACCENTS[tag] ?? CUSTOM_TAG_ACCENTS[hashString(tag) % CUSTOM_TAG_ACCENTS.length];
+
+/**
+ * Turns whatever was typed into a tag label, or `null` when nothing is left.
+ *
+ * A tag is always a single `#`-prefixed token: any leading `#`s and surrounding
+ * spaces are dropped, the rest is lowercased and has its spaces squeezed out, so
+ * `"  ##Deep Work "` becomes `#deepwork`. Lowercasing keeps one idea one tag —
+ * the vocabulary is all lowercase, and `#Gym` beside `#gym` would be two filters
+ * over the same thing.
+ */
+export function normalizeTagInput(raw: string): string | null {
+  const token = raw
+    .trim()
+    .replace(/^#+/, '')
+    .replace(/\s+/g, '')
+    .toLowerCase();
+  return token ? `#${token}` : null;
+}
+
+/** True when this label is one the user must have created, not a shipped tag. */
+export const isCustomTag = (label: string): boolean => !isVocabularyTag(label);
+
+/**
+ * The full tag list to render: the vocabulary first, then the user's own, with
+ * duplicates dropped.
+ *
+ * Deduplication is the reason this is a function rather than a spread. A user
+ * tag that matches a vocabulary label — or another user tag — must not appear
+ * twice, and only the vocabulary carries a hand-picked hue; the rest derive one
+ * from the label so every consumer agrees.
+ */
+export function mergeTags(custom: readonly string[]): TagOption[] {
+  const merged: TagOption[] = AVAILABLE_TAGS.map((tag) => ({
+    label: tag.label,
+    accent: tag.accent,
+  }));
+  const seen = new Set(merged.map((tag) => tag.label));
+  for (const label of custom) {
+    if (seen.has(label)) continue;
+    seen.add(label);
+    merged.push({ label, accent: accentFor(label) });
+  }
+  return merged;
+}
+
+/** Persists the user's own tag labels. Hues are derived, never stored. */
+export const CUSTOM_TAGS_STORAGE_KEY = 'customTags';
 
 /** Same hex as `accent` at ~12% opacity, for tinted chip backgrounds. */
 export const tintOf = (accent: string): string => `${accent}1F`;

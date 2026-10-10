@@ -100,7 +100,7 @@ const createStyles = (t: Theme) => {
   const c = t.colors;
   return StyleSheet.create({
     swipeableContainer: {
-      marginBottom: 10,
+      marginBottom: 8,
       borderRadius: 8,
       overflow: 'hidden',
       // Backing colour for the revealed pane, so no light flash shows through

@@ -17,6 +17,7 @@ import { AddTodoModal, type TodoDraft } from '../../components/AddTodoModal';
 import type { Todo } from '../../todos/model';
 import { AVAILABLE_TAGS } from '../../todos/tags';
 import { isValidDayKey, localDateFromDayKey, todayKey } from '../../productivity';
+import { isValidTimeKey } from '../../todos/timeKey';
 import {
   byLabel,
   hostNodes,
@@ -189,6 +190,31 @@ async function dismissPicker(renderer: Renderer): Promise<void> {
   });
 }
 
+/** The time picker's host view, once it is on screen. */
+function timePicker(renderer: Renderer): ReactTestRenderer.ReactTestInstance {
+  const found = hostNodes(renderer).filter(
+    (n) => String(n.type).includes('DateTimePicker') && n.props?.mode === 'time',
+  );
+  if (found.length !== 1) throw new Error(`expected 1 time picker, found ${found.length}`);
+  return found[0];
+}
+
+/** Drives the time picker the same way the date one is driven. */
+async function chooseTime(renderer: Renderer, time: Date): Promise<void> {
+  const { onChange } = timePicker(renderer).props;
+  await ReactTestRenderer.act(async () => {
+    onChange({ nativeEvent: { timestamp: time.getTime(), utcOffset: 0 } });
+  });
+}
+
+/** Closes the time picker's dialog, as Android does after any outcome. */
+async function dismissTimePicker(renderer: Renderer): Promise<void> {
+  const { onPickerDismiss } = timePicker(renderer).props;
+  await ReactTestRenderer.act(async () => {
+    onPickerDismiss();
+  });
+}
+
 /**
  * Today, at `hours` past local midnight.
  *
@@ -334,6 +360,144 @@ describe('AddTodoModal — the date field', () => {
     } finally {
       warn.mockRestore();
     }
+  });
+});
+
+// --- Time --------------------------------------------------------------------
+
+describe('AddTodoModal — the time field', () => {
+  it('offers to add a time rather than showing an empty one', async () => {
+    await withRendered(element(), (renderer) => {
+      expect(visibleText(renderer)).toContain('Add a time');
+    });
+  });
+
+  it('stores no time unless one was chosen', async () => {
+    const onSubmit = jest.fn<void, [TodoDraft]>();
+    await withRendered(element({ onSubmit }), async (renderer) => {
+      await type(renderer, 'Task title', 'Buy milk');
+      await press(renderer, 'Add task');
+    });
+    expect(persisted(onSubmit.mock.calls[0][0])).not.toHaveProperty('dueTime');
+  });
+
+  it('shows no time picker until the time row is tapped', async () => {
+    await withRendered(element(), async (renderer) => {
+      expect(
+        hostNodes(renderer).filter((n) => n.props?.mode === 'time'),
+      ).toHaveLength(0);
+      await press(renderer, 'Add a reminder time');
+      expect(
+        hostNodes(renderer).filter((n) => n.props?.mode === 'time'),
+      ).toHaveLength(1);
+    });
+  });
+
+  it('labels the time row once a time is chosen, and defaults the day to today', async () => {
+    // A time with no day has nothing to fire on, so choosing one supplies today
+    // rather than silently going nowhere.
+    await withRendered(element(), async (renderer) => {
+      await press(renderer, 'Add a reminder time');
+      await chooseTime(renderer, todayAt(14, 30));
+      expect(visibleText(renderer)).toContain('2:30 PM');
+      expect(labels(renderer)).toContain('Reminder time, 2:30 PM. Tap to change.');
+      expect(labels(renderer)).toContain('Due date, Today. Tap to change.');
+    });
+  });
+
+  it('stores the picked time as an `HH:mm` key in local time', async () => {
+    const onSubmit = jest.fn<void, [TodoDraft]>();
+    await withRendered(element({ onSubmit }), async (renderer) => {
+      await type(renderer, 'Task title', 'Buy milk');
+      await press(renderer, 'Add a reminder time');
+      await chooseTime(renderer, todayAt(9, 5));
+      await press(renderer, 'Add task');
+    });
+    const { dueTime, dueDate } = onSubmit.mock.calls[0][0];
+    expect(dueTime).toBe('09:05');
+    expect(isValidTimeKey(dueTime)).toBe(true);
+    // It brought today along, since a time alone cannot fire.
+    expect(dueDate).toBe(todayKey());
+  });
+
+  it('can clear a chosen time', async () => {
+    const onSubmit = jest.fn<void, [TodoDraft]>();
+    await withRendered(element({ onSubmit }), async (renderer) => {
+      await type(renderer, 'Task title', 'Buy milk');
+      await press(renderer, 'Add a reminder time');
+      await chooseTime(renderer, todayAt(14, 30));
+      await press(renderer, 'Remove reminder time');
+      await press(renderer, 'Add task');
+    });
+    expect(persisted(onSubmit.mock.calls[0][0])).not.toHaveProperty('dueTime');
+  });
+
+  it('hides the remove control until a time is chosen', async () => {
+    await withRendered(element(), (renderer) => {
+      expect(labels(renderer)).not.toContain('Remove reminder time');
+    });
+  });
+
+  it('clears the time when the date is removed, since a time needs a day', async () => {
+    const onSubmit = jest.fn<void, [TodoDraft]>();
+    await withRendered(element({ onSubmit }), async (renderer) => {
+      await type(renderer, 'Task title', 'Buy milk');
+      await press(renderer, 'Add a due date');
+      await chooseDate(renderer, todayAt(14));
+      await press(renderer, 'Add a reminder time');
+      await chooseTime(renderer, todayAt(15, 0));
+      await press(renderer, 'Remove due date');
+      await press(renderer, 'Add task');
+    });
+    const draft = persisted(onSubmit.mock.calls[0][0]);
+    expect(draft).not.toHaveProperty('dueDate');
+    expect(draft).not.toHaveProperty('dueTime');
+  });
+
+  it('keeps the time when the picker dialog is dismissed', async () => {
+    await withRendered(element(), async (renderer) => {
+      await press(renderer, 'Add a reminder time');
+      await chooseTime(renderer, todayAt(14, 30));
+      await dismissTimePicker(renderer);
+      expect(
+        hostNodes(renderer).filter((n) => n.props?.mode === 'time'),
+      ).toHaveLength(0);
+      expect(visibleText(renderer)).toContain('2:30 PM');
+    });
+  });
+
+  it('prefills the task being edited with its own time', async () => {
+    const TASK: Todo = {
+      id: 't9',
+      text: 'Renew passport',
+      completed: false,
+      tags: ['#travel'],
+      createdAt: 1,
+      dueDate: todayKey(),
+      dueTime: '09:00',
+    };
+    await withRendered(element({ task: TASK }), (renderer) => {
+      expect(labels(renderer)).toContain('Reminder time, 9:00 AM. Tap to change.');
+    });
+  });
+
+  it('saves an edited time', async () => {
+    const TASK: Todo = {
+      id: 't9',
+      text: 'Renew passport',
+      completed: false,
+      tags: [],
+      createdAt: 1,
+      dueDate: todayKey(),
+      dueTime: '09:00',
+    };
+    const onSubmit = jest.fn<void, [TodoDraft]>();
+    await withRendered(element({ task: TASK, onSubmit }), async (renderer) => {
+      await press(renderer, 'Reminder time, 9:00 AM. Tap to change.');
+      await chooseTime(renderer, todayAt(16, 45));
+      await press(renderer, 'Save changes');
+    });
+    expect(onSubmit.mock.calls[0][0].dueTime).toBe('16:45');
   });
 });
 
@@ -484,6 +648,45 @@ describe('AddTodoModal — the # tag button', () => {
       expect(visibleText(renderer)).toContain('None');
       expect(labels(renderer).filter((l) => l.startsWith('Tag '))).toHaveLength(0);
     });
+  });
+
+  it('offers a tag the user created, and hands it to the draft', async () => {
+    // The merged list is what the app passes, so a tag born on home is usable on
+    // a task without this sheet knowing where it came from.
+    const onSubmit = jest.fn<void, [TodoDraft]>();
+    const tags = [
+      ...AVAILABLE_TAGS.map((tag) => ({ label: tag.label, accent: tag.accent })),
+      { label: '#fitness', accent: '#30D158' },
+    ];
+    await withRendered(element({ onSubmit, tags }), async (renderer) => {
+      await type(renderer, 'Task title', 'Morning run');
+      await press(renderer, 'Choose a tag');
+      expect(labels(renderer)).toContain('Tag #fitness');
+      await press(renderer, 'Tag #fitness');
+      await press(renderer, 'Add task');
+    });
+    expect(persisted(onSubmit.mock.calls[0][0]).tag).toBe('#fitness');
+  });
+
+  it('prefills a task whose stored tag is a user tag', async () => {
+    // The prefill only offers a label the chip row can show; passing the merged
+    // list is what lets a user tag be one of them.
+    const TASK: Todo = {
+      id: 't10',
+      text: 'Morning run',
+      completed: false,
+      tags: ['#fitness'],
+      createdAt: 1,
+    };
+    await withRendered(
+      element({ task: TASK, tags: [{ label: '#fitness', accent: '#30D158' }] }),
+      async (renderer) => {
+        await press(renderer, 'Choose a tag');
+        expect(byLabel(renderer, 'Tag #fitness').props.accessibilityState).toEqual({
+          selected: true,
+        });
+      },
+    );
   });
 });
 

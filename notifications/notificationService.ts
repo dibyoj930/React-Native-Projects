@@ -155,6 +155,79 @@ export async function getPendingReminders(): Promise<PendingReminder[]> {
   });
 }
 
+/** A task reminder the OS still holds, and when it will fire. */
+export type PendingTaskReminder = {
+  /** The task the reminder belongs to. */
+  taskId: string;
+  /** Epoch ms the OS will deliver the notification. */
+  fireAt: number;
+};
+
+/**
+ * The task reminders the OS still holds.
+ *
+ * Task reminders carry their own data key rather than `todoId`, so they cannot
+ * be mistaken for a running timer by `getPendingTimers`; the two share the
+ * native trigger list but answer different questions.
+ */
+export async function getPendingTaskReminders(): Promise<PendingTaskReminder[]> {
+  const pending = await readPendingTriggers();
+  return pending.flatMap(({ data, fireAt }) => {
+    const taskId = data?.taskReminder;
+    return typeof taskId === 'string' ? [{ taskId, fireAt }] : [];
+  });
+}
+
+export interface TaskReminderNotificationInput {
+  /** The task the reminder belongs to; the notification id is prefixed with `task-reminder-`. */
+  taskId: string;
+  title: string;
+  body: string;
+  /** Date.now() based epoch ms for when it should fire. */
+  fireAt: number;
+}
+
+/** Schedules one task reminder as a one-shot timestamp trigger. */
+export async function scheduleTaskReminder(
+  input: TaskReminderNotificationInput,
+): Promise<void> {
+  const permission = await ensurePermission();
+  if (permission !== 'granted') return;
+
+  try {
+    await notifee.createTriggerNotification(
+      {
+        id: `task-reminder-${input.taskId}`,
+        title: input.title,
+        body: input.body,
+        data: { taskReminder: input.taskId },
+        ios: {
+          foregroundPresentationOptions: {
+            banner: true,
+            sound: true,
+            list: true,
+          },
+        },
+      },
+      {
+        type: TriggerType.TIMESTAMP,
+        timestamp: Math.max(input.fireAt, Date.now() + 1000),
+      },
+    );
+  } catch (error) {
+    console.warn('[notifications] scheduleTaskReminder failed:', error);
+  }
+}
+
+/** Removes a pending task reminder (task completed, edited, or deleted). */
+export async function cancelTaskReminder(taskId: string): Promise<void> {
+  try {
+    await notifee.cancelTriggerNotification(`task-reminder-${taskId}`);
+  } catch (error) {
+    console.warn('[notifications] cancelTaskReminder failed:', error);
+  }
+}
+
 export interface ReminderNotificationInput {
   /** Reminder identity; the OS notification id is prefixed with `reminder-`. */
   id: string;
@@ -218,7 +291,10 @@ export function onForegroundEvent(handler: (event: Event) => void): () => void {
 export async function getInitialPressedTodoId(): Promise<string | null> {
   try {
     const initial = await notifee.getInitialNotification();
-    const todoId = initial?.notification?.data?.todoId;
+    const data = initial?.notification?.data;
+    // A timer alert and a task reminder both point at a task; they differ only in
+    // which key carries the id, so a tap on either opens the same place.
+    const todoId = data?.todoId ?? data?.taskReminder;
     return typeof todoId === 'string' ? todoId : null;
   } catch (error) {
     console.warn('[notifications] getInitialNotification failed:', error);

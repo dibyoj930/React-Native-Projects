@@ -12,15 +12,20 @@ import notifee from '@notifee/react-native';
 
 import {
   cancelReminder,
+  cancelTaskReminder,
+  getInitialPressedTodoId,
   getPendingReminders,
+  getPendingTaskReminders,
   getPendingTimers,
   scheduleReminder,
+  scheduleTaskReminder,
 } from '../../notifications/notificationService';
 
 const getTriggerNotifications = notifee.getTriggerNotifications as unknown as jest.Mock;
 const createTriggerNotification = notifee.createTriggerNotification as unknown as jest.Mock;
 const cancelTriggerNotification = notifee.cancelTriggerNotification as unknown as jest.Mock;
 const requestPermission = notifee.requestPermission as unknown as jest.Mock;
+const getInitialNotification = notifee.getInitialNotification as unknown as jest.Mock;
 
 beforeEach(() => {
   getTriggerNotifications.mockReset();
@@ -30,6 +35,8 @@ beforeEach(() => {
   cancelTriggerNotification.mockResolvedValue(undefined);
   requestPermission.mockReset();
   requestPermission.mockResolvedValue({ authorizationStatus: 1 });
+  getInitialNotification.mockReset();
+  getInitialNotification.mockResolvedValue(null);
 });
 
 /** A trigger-notification shaped like the one the timer path schedules. */
@@ -118,5 +125,81 @@ describe('cancelReminder', () => {
     await cancelReminder('daily-2026-05-04');
 
     expect(cancelTriggerNotification).toHaveBeenCalledWith('reminder-daily-2026-05-04');
+  });
+});
+
+describe('getPendingTaskReminders', () => {
+  it('returns the task and fire time of every pending task reminder', async () => {
+    getTriggerNotifications.mockResolvedValueOnce([
+      { notification: { data: { taskReminder: 't1' } }, trigger: { timestamp: 1_000 } },
+      { notification: { data: { taskReminder: 't2' } }, trigger: { timestamp: 2_000 } },
+      // A timer and a daily reminder are not task reminders.
+      { notification: { data: { todoId: 't1' } }, trigger: { timestamp: 3_000 } },
+      { notification: { data: { reminder: 'daily-2026-05-04' } }, trigger: { timestamp: 4_000 } },
+    ]);
+
+    await expect(getPendingTaskReminders()).resolves.toEqual([
+      { taskId: 't1', fireAt: 1_000 },
+      { taskId: 't2', fireAt: 2_000 },
+    ]);
+  });
+});
+
+describe('scheduleTaskReminder', () => {
+  it('schedules a one-shot trigger under a prefixed id', async () => {
+    const fireAt = Date.now() + 60_000;
+
+    await scheduleTaskReminder({ taskId: 't1', title: 'Buy milk', body: 'Task reminder', fireAt });
+
+    expect(createTriggerNotification).toHaveBeenCalledTimes(1);
+    const [notification, trigger] = createTriggerNotification.mock.calls[0];
+    expect(notification).toMatchObject({
+      id: 'task-reminder-t1',
+      title: 'Buy milk',
+      body: 'Task reminder',
+      data: { taskReminder: 't1' },
+    });
+    expect(trigger).toMatchObject({ type: 0, timestamp: fireAt });
+  });
+
+  it('schedules nothing without permission', async () => {
+    requestPermission.mockResolvedValueOnce({ authorizationStatus: 0 });
+
+    await scheduleTaskReminder({
+      taskId: 't1',
+      title: 'Buy milk',
+      body: 'Task reminder',
+      fireAt: Date.now() + 60_000,
+    });
+
+    expect(createTriggerNotification).not.toHaveBeenCalled();
+  });
+});
+
+describe('cancelTaskReminder', () => {
+  it('cancels the trigger by its prefixed id', async () => {
+    await cancelTaskReminder('t1');
+
+    expect(cancelTriggerNotification).toHaveBeenCalledWith('task-reminder-t1');
+  });
+});
+
+describe('getInitialPressedTodoId', () => {
+  it('reads the task id from a timer notification', async () => {
+    getInitialNotification.mockResolvedValueOnce({ notification: { data: { todoId: 't1' } } });
+
+    await expect(getInitialPressedTodoId()).resolves.toBe('t1');
+  });
+
+  it('reads the task id from a task reminder too', async () => {
+    getInitialNotification.mockResolvedValueOnce({
+      notification: { data: { taskReminder: 't2' } },
+    });
+
+    await expect(getInitialPressedTodoId()).resolves.toBe('t2');
+  });
+
+  it('is null on a normal launch', async () => {
+    await expect(getInitialPressedTodoId()).resolves.toBeNull();
   });
 });

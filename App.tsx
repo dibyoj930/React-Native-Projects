@@ -1,5 +1,13 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { BackHandler, StatusBar, StyleSheet, View } from 'react-native';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  AccessibilityInfo,
+  Animated,
+  BackHandler,
+  Easing,
+  StatusBar,
+  StyleSheet,
+  View,
+} from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
@@ -63,6 +71,25 @@ function AppContent() {
   const [screen, setScreen] = useState<Screen>({ name: 'home' });
   const { pressedTodoId, clearPressedTodo } = useNotifications();
 
+  // The fade-and-slide every destination change runs through. `WelcomeComponent`
+  // is never re-keyed, so the task controller above it survives navigation; only
+  // these two values are reset and animated back to rest, which is what makes the
+  // switch read as a transition rather than a jump.
+  const opacity = useRef(new Animated.Value(1)).current;
+  const translateX = useRef(new Animated.Value(0)).current;
+
+  // Read once, then held. A reduce-motion user asked for movement to stop, so the
+  // wrapper snaps instead of animating — checked from a ref at transition time
+  // rather than as state, so toggling it never replays the current screen.
+  const reduceMotion = useRef(false);
+  useEffect(() => {
+    Promise.resolve(AccessibilityInfo.isReduceMotionEnabled?.())
+      .then((value) => {
+        reduceMotion.current = value === true;
+      })
+      .catch(() => undefined);
+  }, []);
+
   // Reminders need both the notification layer and the productivity snapshot, so
   // they are reconciled here, below both providers.
   useReminders();
@@ -92,9 +119,43 @@ function AppContent() {
     return () => subscription.remove();
   }, [screen.name]);
 
+  // Replays on every destination change. Home is the shallowest screen, so it
+  // slides in from the left and everything else steps in from the right; sub-
+  // screens are only ever reached and left through home, so two directions cover
+  // every real move.
+  useEffect(() => {
+    const from = screen.name === 'home' ? -24 : 24;
+
+    if (reduceMotion.current) {
+      opacity.setValue(1);
+      translateX.setValue(0);
+      return;
+    }
+    opacity.setValue(0);
+    translateX.setValue(from);
+    Animated.parallel([
+      Animated.timing(opacity, {
+        toValue: 1,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(translateX, {
+        toValue: 0,
+        duration: 220,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [screen.name, opacity, translateX]);
+
   return (
     <View style={styles.container}>
-      <WelcomeComponent onNavigate={setScreen} screen={screen} />
+      <Animated.View
+        style={[styles.screen, { opacity, transform: [{ translateX }] }]}
+      >
+        <WelcomeComponent onNavigate={setScreen} screen={screen} />
+      </Animated.View>
     </View>
   );
 }
@@ -110,6 +171,10 @@ const createStyles = (t: Theme) =>
     container: {
       flex: 1,
       backgroundColor: t.colors.background,
+    },
+    /** The transition wrapper: same box as the screen it carries. */
+    screen: {
+      flex: 1,
     },
   });
 

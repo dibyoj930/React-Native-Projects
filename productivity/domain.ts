@@ -49,6 +49,7 @@ export {
   formatDueLabel,
   formatDuration,
   formatElapsed,
+  formatWeekday,
   progressRatio,
 } from './format';
 

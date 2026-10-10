@@ -44,6 +44,7 @@ const todo: Todo = {
   tags: ['#coding'],
   notes: 'with diagrams',
   dueDate: '2026-05-03',
+  dueTime: '14:30',
 };
 
 describe('buildExportPayload', () => {
@@ -66,6 +67,7 @@ describe('buildExportPayload', () => {
     const payload = buildExportPayload([todo], snapshot());
     expect(payload.tasks[0]).not.toHaveProperty('notes');
     expect(payload.tasks[0]).not.toHaveProperty('dueDate');
+    expect(payload.tasks[0]).not.toHaveProperty('dueTime');
     expect(JSON.stringify(payload)).not.toContain('with diagrams');
   });
 

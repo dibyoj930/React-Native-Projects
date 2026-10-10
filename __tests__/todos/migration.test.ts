@@ -28,6 +28,7 @@ describe('migrateTodos — legacy tasks', () => {
     // Absent, not empty. An old task genuinely has no notes and no date.
     expect(task.notes).toBeUndefined();
     expect(task.dueDate).toBeUndefined();
+    expect(task.dueTime).toBeUndefined();
   });
 
   it('backfills createdAt with the supplied load time', () => {
@@ -65,7 +66,17 @@ describe('migrateTodos — legacy tasks', () => {
       NOW,
     );
     expect(Object.keys(task).sort()).toEqual(
-      ['completed', 'completedAt', 'createdAt', 'dueDate', 'id', 'notes', 'tags', 'text'].sort(),
+      [
+        'completed',
+        'completedAt',
+        'createdAt',
+        'dueDate',
+        'dueTime',
+        'id',
+        'notes',
+        'tags',
+        'text',
+      ].sort(),
     );
   });
 });
@@ -128,6 +139,49 @@ describe('migrateTodos — a corrupt dueDate costs the field, not the task', () 
   it('accepts a leap day, which is a real day key', () => {
     const [task] = migrateTodos([{ id: 'abc', text: 'X', dueDate: '2024-02-29' }], NOW);
     expect(task.dueDate).toBe('2024-02-29');
+  });
+});
+
+describe('migrateTodos — dueTime round-trip', () => {
+  it('keeps a well-formed time', () => {
+    const [task] = migrateTodos(
+      [{ id: 'abc', text: 'X', dueDate: '2026-10-05', dueTime: '14:30' }],
+      NOW,
+    );
+    expect(task.dueDate).toBe('2026-10-05');
+    expect(task.dueTime).toBe('14:30');
+  });
+
+  it('accepts midnight and the last minute of the day', () => {
+    const [[, midnight], [, lastMinute]] = migrateTodos(
+      [
+        { id: 'a', text: 'X', dueTime: '00:00' },
+        { id: 'b', text: 'X', dueTime: '23:59' },
+      ],
+      NOW,
+    ).map((task) => [task.id, task.dueTime]);
+    expect(midnight).toBe('00:00');
+    expect(lastMinute).toBe('23:59');
+  });
+
+  it.each([
+    ['24:00', 'hour out of range'],
+    ['9:05', 'unpadded hour'],
+    ['23:60', 'minute out of range'],
+    ['14:3', 'unpadded minute'],
+    ['2:30 PM', 'a formatted label instead of a key'],
+    ['', 'empty'],
+    ['noon', 'nonsense'],
+  ])('drops %p (%s)', (dueTime) => {
+    const [task] = migrateTodos([{ id: 'abc', text: 'Keep me', dueTime }], NOW);
+    expect(task.dueTime).toBeUndefined();
+    expect(task.id).toBe('abc');
+  });
+
+  it.each([null, 0, true, [], {}])('drops the non-string value %p', (dueTime) => {
+    const [task] = migrateTodos([{ id: 'abc', text: 'Keep me', dueTime }], NOW);
+    expect(task.dueTime).toBeUndefined();
+    expect(task.id).toBe('abc');
   });
 });
 

@@ -93,6 +93,8 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
     exportTodos,
     rowPropsFor,
     clearAllTasks,
+    tags,
+    addTag,
   } = useTaskScreen();
 
   // Settings reaches across four domains; its controller owns the confirmations
@@ -141,6 +143,7 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
         defaultTag={screen.name === 'tag' ? screen.tag : undefined}
         onClose={closeTaskSheet}
         onSubmit={submitTask}
+        tags={tags}
         task={editingTodo}
         visible={showTaskSheet}
       />
@@ -198,11 +201,13 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
     <View style={styles.screen}>
       <HomeScreen
         notificationsBlocked={notificationsBlocked}
+        onAddTag={addTag}
         onAddTask={openCreate}
         onExport={exportTodos}
         onOpenSettings={() => onNavigate({ name: 'settings' })}
         onOpenTag={(tag) => onNavigate({ name: 'tag', tag })}
         onOpenTasks={() => onNavigate({ name: 'tasks' })}
+        tags={tags}
         todos={todos}
       />
       {sheets}

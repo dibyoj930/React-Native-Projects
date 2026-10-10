@@ -48,7 +48,7 @@ export type SnapshotInput = {
   recentDayCount?: number;
 };
 
-export const DEFAULT_RECENT_DAYS = 14;
+export const DEFAULT_RECENT_DAYS = 7;
 
 export function buildSnapshot({
   sessions,

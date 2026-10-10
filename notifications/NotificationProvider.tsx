@@ -135,7 +135,9 @@ export function NotificationProvider({ children }: { children: React.ReactNode }
       // delivery is a heads-up that it fired. They are separate intents and are
       // handled separately, so a tap never leaves a banner behind it.
       if (event.type === EventType.PRESS) {
-        const todoId = notification?.data?.todoId;
+        // A timer alert and a task reminder both identify a task; only the data
+        // key differs. Either way a tap means "open the task list".
+        const todoId = notification?.data?.todoId ?? notification?.data?.taskReminder;
         if (typeof todoId === 'string') setPressedTodoId(todoId);
         return;
       }

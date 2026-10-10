@@ -37,6 +37,12 @@ export type ThemeColors = {
   warningText: string;
   /** Unfilled portion of the progress bar. */
   progressTrack: string;
+  /** Positive focus fill in the recent-focus chart. */
+  focusBar: string;
+  /** Resting (unopened) bar in the recent-focus chart. */
+  focusBarIdle: string;
+  /** Task-count tip above an opened focus bar. */
+  focusTip: string;
 };
 
 export type Theme = {
@@ -62,6 +68,9 @@ export const lightTheme: Theme = {
     warningBorder: '#FFD8A8',
     warningText: '#8A5A00',
     progressTrack: '#E0E0E0',
+    focusBar: '#34C759',
+    focusBarIdle: '#CBEBD5',
+    focusTip: '#FF9500',
   },
 };
 
@@ -83,5 +92,8 @@ export const darkTheme: Theme = {
     warningBorder: '#5A4526',
     warningText: '#FFB84D',
     progressTrack: '#3A3A3C',
+    focusBar: '#30D158',
+    focusBarIdle: '#1F4A2C',
+    focusTip: '#FF9F0A',
   },
 };

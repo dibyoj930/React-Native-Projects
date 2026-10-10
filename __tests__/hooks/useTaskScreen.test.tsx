@@ -12,6 +12,7 @@ import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 import { Alert, Share } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import notifee from '@notifee/react-native';
 
 import { useTaskScreen } from '../../hooks/useTaskScreen';
 import { NotificationProvider } from '../../notifications';
@@ -198,5 +199,41 @@ describe('useTaskScreen — due-date status', () => {
     expect(api!.todos[0].completed).toBe(true);
     // A done task is never nagged about, so the row drops the flag.
     expect(api!.rowPropsFor(api!.todos[0]).overdue).toBe(false);
+  });
+
+  it('shows the reminder time beside the day on the row', async () => {
+    await act(() => api!.openCreate());
+    await act(() =>
+      api!.submitTask({ text: 'Standup', dueDate: todayKey(), dueTime: '09:00' }),
+    );
+    expect(api!.rowPropsFor(api!.todos[0]).dueLabel).toBe('Today · 9:00 AM');
+  });
+});
+
+describe('useTaskScreen — task reminders reach the OS', () => {
+  const createTriggerNotification = notifee.createTriggerNotification as unknown as jest.Mock;
+
+  beforeEach(async () => {
+    // Pin the clock so a task due later today is unambiguously in the future.
+    jest.setSystemTime(new Date(2026, 4, 4, 8, 0, 0));
+    createTriggerNotification.mockClear();
+    await render(controllerTree());
+    await settle();
+  });
+
+  it('schedules a notification for a task saved with a date and time', async () => {
+    await act(() =>
+      api!.submitTask({
+        text: 'Standup',
+        dueDate: '2026-05-04',
+        dueTime: '09:00',
+      }),
+    );
+    await settle();
+
+    expect(createTriggerNotification).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'task-reminder-' + api!.todos[0].id }),
+      expect.objectContaining({ timestamp: new Date(2026, 4, 4, 9, 0, 0).getTime() }),
+    );
   });
 });

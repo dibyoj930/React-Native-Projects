@@ -9,6 +9,7 @@
  */
 
 import { isValidDayKey, type DayKey } from '../productivity';
+import { isValidTimeKey, type TimeKey } from './timeKey';
 
 export type Todo = {
   id: string;
@@ -52,6 +53,18 @@ export type Todo = {
    * filtering cannot be built later.
    */
   dueDate?: DayKey;
+  /**
+   * Local wall-clock time associated with `dueDate`, `'HH:mm'`.
+   *
+   * Stored beside the day rather than folded into it, because a day is not an
+   * instant and a time is not a date. The pair is what a task reminder schedules
+   * from: only when both are present does the task name a specific moment, and
+   * only then does a notification have somewhere to fire.
+   *
+   * Meaningless without `dueDate`, and absent means "no time" — which keeps a
+   * date-only task distinguishable from one that reminds at an hour.
+   */
+  dueTime?: TimeKey;
 };
 
 /**
@@ -68,6 +81,8 @@ export type TodoDraft = {
   text: string;
   notes?: string;
   dueDate?: DayKey;
+  /** The reminder time beside `dueDate`, or absent for a date-only task. */
+  dueTime?: TimeKey;
   /**
    * The chosen tag, or absent for none.
    *
@@ -102,7 +117,9 @@ export type TodoDraft = {
  * `dueDate` is shape-checked rather than trusted. Storage is user-writable, and
  * its consumers are string comparisons like `dueDate >= today`, which a
  * malformed key would silently corrupt rather than crash. A bad value costs the
- * field; it never costs the task.
+ * field; it never costs the task. `dueTime` is checked the same way, for the same
+ * reason: it becomes the instant of a scheduled notification, so a malformed one
+ * would fail to schedule rather than merely look wrong.
  *
  * `completedAt` is deliberately left undefined rather than guessed, because an
  * invented completion timestamp would corrupt daily statistics.
@@ -126,6 +143,7 @@ export function migrateTodos(parsed: readonly unknown[], now: number): Todo[] {
       tags: Array.isArray(legacy.tags) ? legacy.tags.map(String) : [],
       notes: typeof legacy.notes === 'string' ? legacy.notes : undefined,
       dueDate: isValidDayKey(legacy.dueDate) ? legacy.dueDate : undefined,
+      dueTime: isValidTimeKey(legacy.dueTime) ? legacy.dueTime : undefined,
     };
   });
 }

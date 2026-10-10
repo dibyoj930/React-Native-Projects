@@ -17,7 +17,8 @@ import ReactTestRenderer from 'react-test-renderer';
 import { HomeScreen, type HomeScreenProps } from '../../components/HomeScreen';
 import { ProductivityProvider } from '../../productivity';
 import type { Todo } from '../../todos/model';
-import { byLabel, labels, press, visibleText, withRendered } from '../support/render';
+import { AVAILABLE_TAGS } from '../../todos/tags';
+import { byLabel, focusText, labels, press, submitText, textContent, typeText, visibleText, withRendered } from '../support/render';
 
 function todo(overrides: Partial<Todo> & { id: string }): Todo {
   return {
@@ -35,6 +36,8 @@ function props(overrides: Partial<HomeScreenProps> = {}): HomeScreenProps {
     notificationsBlocked: false,
     onOpenTasks: () => {},
     onOpenTag: () => {},
+    tags: [...AVAILABLE_TAGS],
+    onAddTag: () => {},
     onAddTask: () => {},
     onOpenSettings: () => {},
     onExport: () => {},
@@ -188,6 +191,65 @@ describe('HomeScreen — what it reports back', () => {
       expect(exportButton(renderer).props.accessibilityState).toEqual({
         disabled: true,
       });
+    });
+  });
+});
+
+describe('HomeScreen — adding a tag', () => {
+  it('draws the tags it is handed, not a fixed list', async () => {
+    // The section is presentational: a tag the user made is just another entry
+    // in the list it is passed.
+    const tags = [
+      { label: '#coding', accent: '#0A84FF' },
+      { label: '#deepwork', accent: '#30D158' },
+    ];
+    await withRendered(screen({ tags }), (renderer) => {
+      const chipLabels = labels(renderer).filter((l) => l.startsWith('Show tasks tagged'));
+      expect(chipLabels).toEqual(['Show tasks tagged #coding', 'Show tasks tagged #deepwork']);
+    });
+  });
+
+  it('reports the typed text as a tag and clears the field', async () => {
+    // The raw string is handed over untouched; normalisation (the `#`, the
+    // lowercasing) is the tag domain's job, not this screen's.
+    const onAddTag = jest.fn();
+    await withRendered(screen({ onAddTag }), async (renderer) => {
+      await typeText(renderer, 'Add a tag', 'Deep Work');
+      await submitText(renderer, 'Add a tag');
+      expect(onAddTag).toHaveBeenCalledWith('Deep Work');
+      expect(onAddTag).toHaveBeenCalledTimes(1);
+      // Cleared, so the next tag starts from nothing.
+      expect(byLabel(renderer, 'Add a tag').props.value).toBe('');
+    });
+  });
+
+  it('hides the add control behind no label of its own', async () => {
+    // It shows nothing at rest — no chip text, no placeholder — so the only
+    // thing that names it is the accessibility label.
+    await withRendered(screen(), (renderer) => {
+      expect(labels(renderer)).toContain('Add a tag');
+      expect(visibleText(renderer)).not.toContain('Add a tag');
+    });
+  });
+});
+
+describe('HomeScreen — the add-tag chip', () => {
+  it('draws a coloured chip with the cursor once the field is focused', async () => {
+    await withRendered(screen(), async (renderer) => {
+      // Nothing in the tree is a lone `#` at rest; the tag chips read `#coding`
+      // and so on, which is a different string.
+      expect(textContent(renderer)).not.toContain('#');
+      await focusText(renderer, 'Add a tag');
+      expect(textContent(renderer)).toContain('#');
+      // The same field is still the one assistive tech reaches.
+      expect(labels(renderer)).toContain('Add a tag');
+    });
+  });
+
+  it('keeps the chip up while there is text, focus or not', async () => {
+    await withRendered(screen(), async (renderer) => {
+      await typeText(renderer, 'Add a tag', 'Deep Work');
+      expect(textContent(renderer)).toContain('#');
     });
   });
 });

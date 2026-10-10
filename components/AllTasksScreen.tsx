@@ -258,7 +258,16 @@ export function AllTasksScreen({
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => renderRow(item)}
         renderSectionHeader={({ section }) => (
-          <Text style={styles.sectionHeader}>{section.title}</Text>
+          // Overdue is the one heading that is a call to action, so it carries
+          // the danger token rather than the neutral one the rest share.
+          <Text
+            style={[
+              styles.sectionHeader,
+              section.title === 'Overdue' && styles.sectionHeaderOverdue,
+            ]}
+          >
+            {section.title}
+          </Text>
         )}
         stickySectionHeadersEnabled={false}
         // The list is the screen, so it owns the bottom inset. Without this the last
@@ -348,16 +357,14 @@ const createStyles = (t: Theme) => {
     /**
      * The search box and the tag filter, between the header and the list.
      *
-     * Its own hairline rather than a gap, because it is a second band of chrome
-     * over the same list — the divider is what says the two belong to the screen
-     * rather than to any one row.
+     * No rule under it: the header already closes the chrome with its own
+     * hairline, and a second line directly above the first task read as a stray
+     * divider rather than as structure.
      */
     filters: {
       paddingHorizontal: 16,
       paddingTop: 12,
       gap: 10,
-      borderBottomWidth: StyleSheet.hairlineWidth,
-      borderBottomColor: c.divider,
     },
     searchBox: {
       flexDirection: 'row',
@@ -394,9 +401,12 @@ const createStyles = (t: Theme) => {
       letterSpacing: 0.4,
       textTransform: 'uppercase',
       color: c.textMuted,
-      paddingTop: 14,
-      paddingBottom: 6,
+      paddingTop: 12,
+      paddingBottom: 4,
       backgroundColor: c.background,
+    },
+    sectionHeaderOverdue: {
+      color: c.danger,
     },
     listContent: {
       paddingHorizontal: 16,

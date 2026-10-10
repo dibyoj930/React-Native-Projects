@@ -75,6 +75,18 @@ describe('NotificationProvider — presses', () => {
     });
   });
 
+  it('surfaces the task id of a pressed task reminder', async () => {
+    // A reminder and a timer alert point at the same place; only the data key
+    // differs, and a tap on either must open the task list.
+    await withRendered(tree(), async () => {
+      await deliver({
+        type: EventType.PRESS,
+        detail: { notification: { data: { taskReminder: 'task-2' } } },
+      });
+      expect(api!.pressedTodoId).toBe('task-2');
+    });
+  });
+
   it('picks up the notification that launched the app from cold', async () => {
     getInitialNotification.mockResolvedValueOnce({
       notification: { data: { todoId: 'task-9' } },
@@ -84,6 +96,18 @@ describe('NotificationProvider — presses', () => {
       await settle();
 
       expect(api!.pressedTodoId).toBe('task-9');
+    });
+  });
+
+  it('picks up a cold-launching task reminder too', async () => {
+    getInitialNotification.mockResolvedValueOnce({
+      notification: { data: { taskReminder: 'task-7' } },
+    });
+
+    await withRendered(tree(), async () => {
+      await settle();
+
+      expect(api!.pressedTodoId).toBe('task-7');
     });
   });
 });

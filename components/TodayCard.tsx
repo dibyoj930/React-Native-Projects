@@ -20,6 +20,14 @@ import type { Theme } from '../theme/theme';
  * takes longer than the answer is worth. A score also had to be explained before
  * it could be acted on. Two goals you can see themselves approaching cannot.
  *
+ * The card reads top-down as one sentence: how it feels (momentum), then the two
+ * numbers behind that feeling. It deliberately no longer prints its own "Today"
+ * heading — the screen is already titled "Today", and the repeat pushed the two
+ * bars into a narrow strip that was harder to read at a glance than the numbers
+ * it drew. Letting each meter own a full-width pair of lines — name and value
+ * together, then a bar the width of the card — costs one extra line and buys a
+ * track you can actually measure progress against.
+ *
  * The score is still computed, with the same weights and decay. It is simply not
  * something the user has to study.
  *
@@ -46,7 +54,11 @@ export function TodayCard() {
 
   return (
     <View style={styles.card}>
-      <Text style={styles.label}>Today</Text>
+      {/* The momentum line leads. It is the one sentence on this card a person
+          actually reads, and it answers the same "how is today going?" question
+          the page title already asks — so the card no longer repeats "Today"
+          above its own numbers. */}
+      <Text style={styles.momentum}>{MOMENTUM_BAND_LABELS[momentum.band]}</Text>
 
       <Meter
         label="Focus time"
@@ -63,8 +75,6 @@ export function TodayCard() {
         styles={styles}
         tint={missionToday.tasksRatio >= 1 ? t.colors.primary : t.colors.textMuted}
       />
-
-      <Text style={styles.momentum}>{MOMENTUM_BAND_LABELS[momentum.band]}</Text>
     </View>
   );
 }
@@ -92,12 +102,14 @@ function Meter({
 }) {
   return (
     <View style={styles.meter}>
-      <Text style={styles.meterLabel}>{label}</Text>
+      <View style={styles.meterTop}>
+        <Text style={styles.meterLabel}>{label}</Text>
+        <Text style={styles.meterValue}>{value}</Text>
+      </View>
       <View style={styles.track}>
         <View style={[styles.fill, { flex: Math.max(ratio, 0.02), backgroundColor: tint }]} />
         <View style={[styles.rest, { flex: Math.max(1 - ratio, 0) }]} />
       </View>
-      <Text style={styles.meterValue}>{value}</Text>
     </View>
   );
 }
@@ -108,33 +120,46 @@ const createStyles = (t: Theme) =>
       backgroundColor: t.colors.surface,
       borderRadius: 16,
       padding: 16,
-      gap: 8,
+      gap: 12,
       borderWidth: t.mode === 'dark' ? StyleSheet.hairlineWidth : 0,
       borderColor: t.colors.border,
     },
-    label: {
-      color: t.colors.textMuted,
-      fontSize: 12,
+    /**
+     * The encouragement line, which is the first thing the card says.
+     *
+     * Sits on its own row rather than beside the meters so a full sentence has
+     * room to say itself without truncating.
+     */
+    momentum: {
+      color: t.colors.text,
+      fontSize: 15,
       fontWeight: '600',
-      letterSpacing: 0.6,
-      textTransform: 'uppercase',
     },
+    /**
+     * One goal: its name and numbers on one line, its bar full-width below.
+     *
+     * The value shares the name's line rather than trailing the bar, which is
+     * what frees the track to span the whole card instead of the narrow strip
+     * left between a fixed-width label and a fixed-width readout.
+     */
     meter: {
+      gap: 6,
+    },
+    meterTop: {
       flexDirection: 'row',
-      alignItems: 'center',
-      gap: 10,
+      alignItems: 'baseline',
+      justifyContent: 'space-between',
+      gap: 8,
     },
     meterLabel: {
       color: t.colors.text,
       fontSize: 13,
       fontWeight: '600',
-      width: 74,
     },
     track: {
-      flex: 1,
       flexDirection: 'row',
-      height: 6,
-      borderRadius: 3,
+      height: 8,
+      borderRadius: 4,
       overflow: 'hidden',
     },
     fill: {
@@ -148,12 +173,6 @@ const createStyles = (t: Theme) =>
       color: t.colors.textMuted,
       fontSize: 12,
       fontVariant: ['tabular-nums'],
-      minWidth: 86,
       textAlign: 'right',
-    },
-    momentum: {
-      color: t.colors.text,
-      fontSize: 15,
-      fontWeight: '600',
     },
   });

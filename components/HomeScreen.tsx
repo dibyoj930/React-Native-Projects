@@ -11,11 +11,12 @@
  * documented exception, not a dependency this component adds; everything *it*
  * displays arrives as a prop.
  */
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -25,7 +26,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ProductivityDashboard } from './ProductivityDashboard';
 import { TodayCard } from './TodayCard';
 import type { Todo } from '../todos/model';
-import { AVAILABLE_TAGS, tintOf } from '../todos/tags';
+import { accentFor, normalizeTagInput, tintOf, type TagOption } from '../todos/tags';
 import { openCount } from '../todos/taskSelectors';
 import { useTheme } from '../theme/useTheme';
 import type { Theme } from '../theme/theme';
@@ -43,6 +44,16 @@ export type HomeScreenProps = {
   onOpenTasks: () => void;
   /** One tag's list. */
   onOpenTag: (tag: string) => void;
+  /**
+   * The full tag vocabulary: the app's own tags plus any the user has added.
+   *
+   * A prop rather than an import so a tag added on this screen renders here on
+   * the next pass, and so the section stays presentational — it draws the list
+   * it is handed and reports what was typed.
+   */
+  tags: TagOption[];
+  /** Reports a typed tag. Normalising and de-duplicating happen in the domain. */
+  onAddTag: (raw: string) => void;
   /** Opens the create sheet. */
   onAddTask: () => void;
   /** Opens the settings screen. */
@@ -56,18 +67,45 @@ export function HomeScreen({
   notificationsBlocked,
   onOpenTasks,
   onOpenTag,
+  tags,
+  onAddTag,
   onAddTask,
   onOpenSettings,
   onExport,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
   const t = useTheme();
+  // What has been typed into the add-tag field, before Enter commits it.
+  const [draftTag, setDraftTag] = useState('');
+  // Whether the add-tag field holds the keyboard. It is invisible at rest, so
+  // this is what decides when it appears as a chip.
+  const [tagFocused, setTagFocused] = useState(false);
+
+  /**
+   * Commits whatever is in the field.
+   *
+   * The text always clears, even when the domain rejects it: a duplicate or a
+   * blank has no chip to appear, and leaving the text behind would look like the
+   * press was ignored. Normalisation is the domain's, so this screen only has to
+   * hand over the raw string.
+   */
+  const commitTag = useCallback(() => {
+    onAddTag(draftTag);
+    setDraftTag('');
+  }, [draftTag, onAddTag]);
   // Styles are theme-derived, so they are built per theme rather than once at
   // module scope. `useTheme` returns a stable object, so this only recomputes
   // when the system colour scheme actually flips.
   const styles = useMemo(() => createStyles(t), [t]);
 
   const open = openCount(todos);
+
+  // What the add-tag chip looks like while it is up. It appears once the field is
+  // focused or has text, and its colour previews the tag being typed — falling
+  // back to a muted outline until there is a label to derive a hue from.
+  const draftLabel = normalizeTagInput(draftTag);
+  const showTagChip = tagFocused || draftTag.length > 0;
+  const draftAccent = draftLabel ? accentFor(draftLabel) : t.colors.textMuted;
 
   return (
     <>
@@ -157,14 +195,20 @@ export function HomeScreen({
             empty screen whose `+` creates its first task, which is the only way
             a task can come to carry a tag: the chips left the create sheet, so
             a vocabulary entry that disappeared because nothing used it would be
-            gone for good. Empty when unused, never missing. */}
+            gone for good. Empty when unused, never missing.
+
+            The last slot is not a chip at rest: it is the way to a tag that does
+            not exist yet, and until it is focused it shows nothing — no label, no
+            border, no placeholder — so a row of tags is not punctuated by a chip
+            that is secretly a form. Focusing it draws that chip, cursor and all,
+            coloured with the hue the typed tag will actually take. */}
         <View style={styles.tagsSection}>
           <View style={styles.tagsHeadingRow}>
             <Text style={styles.tagsHeader}>Tags</Text>
             <Text style={styles.tagsHint}>Open one to see its tasks</Text>
           </View>
           <View style={styles.tagsChipRow}>
-            {AVAILABLE_TAGS.map((tag) => (
+            {tags.map((tag) => (
               <TouchableOpacity
                 key={tag.label}
                 accessibilityLabel={`Show tasks tagged ${tag.label}`}
@@ -182,6 +226,32 @@ export function HomeScreen({
                 <Text style={[styles.tagChipText, { color: tag.accent }]}>{tag.label}</Text>
               </TouchableOpacity>
             ))}
+            <View
+              style={[
+                styles.addTagChip,
+                showTagChip && styles.addTagChipActive,
+                showTagChip && {
+                  backgroundColor: tintOf(draftAccent),
+                  borderColor: draftAccent,
+                },
+              ]}
+            >
+              {showTagChip && (
+                <Text style={[styles.addTagHash, { color: draftAccent }]}>#</Text>
+              )}
+              <TextInput
+                accessibilityLabel="Add a tag"
+                autoCapitalize="none"
+                autoCorrect={false}
+                onBlur={() => setTagFocused(false)}
+                onChangeText={setDraftTag}
+                onFocus={() => setTagFocused(true)}
+                onSubmitEditing={commitTag}
+                returnKeyType="done"
+                style={styles.addTagInput}
+                value={draftTag}
+              />
+            </View>
           </View>
         </View>
 
@@ -255,7 +325,7 @@ const createStyles = (t: Theme) => {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      marginBottom: 16,
+      marginBottom: 12,
     },
     title: {
       fontSize: 24,
@@ -309,7 +379,7 @@ const createStyles = (t: Theme) => {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 8,
-      marginBottom: 16,
+      marginBottom: 12,
     },
     /**
      * The way into the task list.
@@ -322,7 +392,7 @@ const createStyles = (t: Theme) => {
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'space-between',
-      paddingVertical: 14,
+      paddingVertical: 12,
       paddingHorizontal: 12,
       borderRadius: 10,
       backgroundColor: c.surface,
@@ -348,9 +418,12 @@ const createStyles = (t: Theme) => {
      * to see its tasks" is the one line that tells this apart from it.
      */
     tagsSection: {
-      marginBottom: 16,
-      marginTop: 4,
-      paddingVertical: 14,
+      marginBottom: 12,
+      // The Today card above it is the same surface colour, so the tag index
+      // needs a real gap, not a hairline, to read as its own panel rather than
+      // the bottom half of the card above.
+      marginTop: 16,
+      paddingVertical: 12,
       paddingHorizontal: 12,
       borderRadius: 10,
       backgroundColor: c.surface,
@@ -386,10 +459,50 @@ const createStyles = (t: Theme) => {
       fontSize: 13,
       fontWeight: '600',
     },
+    /**
+     * The add-tag chip's resting shell.
+     *
+     * At rest it is invisible — no fill, and a border only a person cannot see —
+     * so the row of tags is not punctuated by a chip that is secretly a form. The
+     * border is present at 1px even at rest so focusing changes only its colour,
+     * not the layout; `addTagChipActive` adds the metrics of a real chip.
+     */
+    addTagChip: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: 'transparent',
+    },
+    /** The focused/typing state: the padding and radius of a tag chip. */
+    addTagChipActive: {
+      paddingHorizontal: 10,
+    },
+    /** The leading `#`, shown only once the chip is up. */
+    addTagHash: {
+      fontSize: 13,
+      fontWeight: '600',
+    },
+    /**
+     * The add-tag field itself.
+     *
+     * Invisible at rest — no placeholder, no fill — so the only thing it ever
+     * contributes to the row is a caret once it is tapped. The min-width keeps it
+     * a reachable target and lets a short tag be typed without the row reflowing
+     * on every keystroke.
+     */
+    addTagInput: {
+      minWidth: 56,
+      paddingHorizontal: 4,
+      paddingVertical: 6,
+      fontSize: 13,
+      color: c.text,
+    },
     exportFooter: {
       borderTopWidth: 1,
       borderTopColor: c.divider,
       paddingTop: 12,
+      paddingHorizontal: 16,
       marginTop: 12,
       backgroundColor: c.background,
     },

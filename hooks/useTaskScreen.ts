@@ -29,8 +29,12 @@ import type { Todo, TodoDraft } from '../todos/model';
 import { buildExportPayload, exportFilename } from '../todos/taskRepository';
 import { isCompletionDisabled, manualToggleStatus } from '../todos/taskRules';
 import { findTodo, isOverdue } from '../todos/taskSelectors';
+import type { TagOption } from '../todos/tags';
+import { formatTimeLabel } from '../todos/timeKey';
+import { useCustomTags } from '../todos/useCustomTags';
 import { useTasks } from '../todos/useTasks';
 import type { TimerState } from './useFocusTimer';
+import { useTaskReminders } from './useTaskReminders';
 import { useTimerOrchestration } from './useTimerOrchestration';
 
 /** Everything `WelcomeComponent` reads to compose its screens. */
@@ -67,6 +71,10 @@ export type TaskScreen = {
   rowPropsFor: (todo: Todo) => TodoRowProps;
   /** Empties the list, settling every task's timer and session first. */
   clearAllTasks: () => void;
+  /** The shipped tag vocabulary plus the user's own, deduplicated. */
+  tags: TagOption[];
+  /** Adds whatever was typed as a tag, if it normalises to a new label. */
+  addTag: (raw: string) => void;
 };
 
 export function useTaskScreen(): TaskScreen {
@@ -75,6 +83,7 @@ export function useTaskScreen(): TaskScreen {
   // that need *both* sides: a timer and a task, a session log and a task.
   const {
     todos,
+    hydrated,
     createTodo,
     updateTodo,
     removeTodo,
@@ -82,10 +91,19 @@ export function useTaskScreen(): TaskScreen {
     completeTodos,
     setCompleted,
   } = useTasks();
+  // The tag vocabulary the user has grown, alongside the shipped one. Its own
+  // key and its own persistence: clearing tasks must not clear tags.
+  const { tags, addTag } = useCustomTags();
   // The notification layer already asks the OS for permission on mount — above
   // this hook, in `NotificationProvider` — and owns the answer. Keeping a second
   // copy here meant two identical requests and two states for one fact.
   const { permission } = useNotifications();
+
+  // A task's own date and time become an OS notification. That is a cross-domain
+  // side effect — task state in, native triggers out — so it lives with the list
+  // rather than in the pure planner. `hydrated` keeps the first empty render from
+  // cancelling reminders that outlived the last session.
+  useTaskReminders(todos, hydrated);
 
   // Which task the edit sheet is open for, if any. The sheet holds the form state
   // itself, so this carries only the id — the one thing editing needs to
@@ -358,7 +376,13 @@ export function useTaskScreen(): TaskScreen {
         todo.completed,
         isLocked(todo.id),
       ),
-      dueLabel: todo.dueDate ? formatDueLabel(todo.dueDate, today) : undefined,
+      // The day labels the row; the time, when there is one, says when the
+      // reminder will pop. Composed here so the row keeps taking a single string.
+      dueLabel: todo.dueDate
+        ? [formatDueLabel(todo.dueDate, today), formatTimeLabel(todo.dueTime)]
+            .filter(Boolean)
+            .join(' · ')
+        : undefined,
       overdue: isOverdue(todo, today),
       hasTimer: hasTimer(todo.id),
       isLocked: isLocked(todo.id),
@@ -402,5 +426,7 @@ export function useTaskScreen(): TaskScreen {
     exportTodos,
     rowPropsFor,
     clearAllTasks,
+    tags,
+    addTag,
   };
 }

@@ -10,9 +10,10 @@ export type TaskContext = {
 /**
  * Merges an edit sheet draft into an existing task.
  *
- * `text`, `notes`, `dueDate` and — when the draft carries one — the tag. `id`,
- * `createdAt`, `completed` and `completedAt` are facts about the task rather
- * than form data, so they are not in the draft and cannot be overwritten by it;
+ * `text`, `notes`, `dueDate`, `dueTime` and — when the draft carries one — the
+ * tag. `id`, `createdAt`, `completed` and `completedAt` are facts about the task
+ * rather than form data, so they are not in the draft and cannot be overwritten
+ * by it;
  * that is what makes saving a task from the sheet safe for a completed one.
  *
  * The tag rule is the subtle one: the sheet prefills the current tag when one
@@ -31,6 +32,10 @@ export function applyDraftToTodo(todo: Todo, draft: TodoDraft): Todo {
     text: draft.text,
     notes: draft.notes,
     dueDate: draft.dueDate,
+    // The pair travels together. The sheet always hands back both, so a draft
+    // that has no time clears the task's own — which is what makes removing a
+    // reminder in the sheet actually remove it.
+    dueTime: draft.dueTime,
     // Preserve existing tag unless draft carries one; keeps legacy unknown tags.
     tags: draft.tag ? [draft.tag] : todo.tags,
   };
@@ -57,5 +62,6 @@ export function createTodoFromDraft(draft: TodoDraft, id: string, ctx: TaskConte
     createdAt: ctx.now(),
     notes: draft.notes,
     dueDate: draft.dueDate,
+    dueTime: draft.dueTime,
   };
 }

@@ -174,3 +174,54 @@ export async function typeText(
     `element labelled ${JSON.stringify(label)} has no onChangeText anywhere above it`,
   );
 }
+
+/**
+ * Fires the submit handler for the input carrying this accessibility label.
+ *
+ * The counterpart to `typeText` for a field that commits on Enter (an
+ * `onSubmitEditing` handler) rather than on a button press. Walks the tree for
+ * the same reason the others do: the handler sits on the composite, not on the
+ * host view the label identifies.
+ */
+export async function submitText(renderer: Rendered, label: string): Promise<void> {
+  const host = byLabel(renderer, label);
+  let cursor: ReactTestRenderer.ReactTestInstance | null = host;
+  while (cursor) {
+    if (typeof cursor.props?.onSubmitEditing === 'function') {
+      const { onSubmitEditing } = cursor.props;
+      await ReactTestRenderer.act(async () => {
+        onSubmitEditing();
+      });
+      return;
+    }
+    cursor = cursor.parent;
+  }
+  throw new Error(
+    `element labelled ${JSON.stringify(label)} has no onSubmitEditing anywhere above it`,
+  );
+}
+
+/**
+ * Fires the focus handler for the input carrying this accessibility label.
+ *
+ * Some fields change how they are drawn when they hold the keyboard, so a test
+ * has to be able to say "this is now focused". Walks the tree for the same
+ * reason as `typeText` and `submitText`: the handler is on the composite.
+ */
+export async function focusText(renderer: Rendered, label: string): Promise<void> {
+  const host = byLabel(renderer, label);
+  let cursor: ReactTestRenderer.ReactTestInstance | null = host;
+  while (cursor) {
+    if (typeof cursor.props?.onFocus === 'function') {
+      const { onFocus } = cursor.props;
+      await ReactTestRenderer.act(async () => {
+        onFocus();
+      });
+      return;
+    }
+    cursor = cursor.parent;
+  }
+  throw new Error(
+    `element labelled ${JSON.stringify(label)} has no onFocus anywhere above it`,
+  );
+}
