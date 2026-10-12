@@ -8,9 +8,15 @@ import {
 import MaterialCommunityIcons from '@react-native-vector-icons/material-design-icons';
 import { SwipeableTodoRow } from './SwipeableTodoRow';
 import { accentFor, tintOf } from '../todos/tags';
-import type { Todo } from '../todos/model';
 import { useTheme } from '../theme/useTheme';
 import type { Theme } from '../theme/theme';
+import type { TodoRowProps } from '../todos/rowViewModel';
+
+// The row's props are the contract its controller builds to, so the type lives
+// in the domain (`todos/rowViewModel`) — a controller must not import a
+// component to name its output. Re-exported because this module's public shape
+// always included it, and the row's tests import it from here.
+export type { TodoRowProps } from '../todos/rowViewModel';
 
 /**
  * One task row, shared by the tasks screen and the tag view.
@@ -30,54 +36,6 @@ import type { Theme } from '../theme/theme';
  * decide is the disabled *appearance* and the accessibility state, both read
  * from the same `completionDisabled` flag so they cannot drift apart.
  */
-export type TodoRowProps = {
-  todo: Todo;
-  /** A focus timer is attached to this task. */
-  hasTimer: boolean;
-  /** That timer is counting down, rather than paused. */
-  isRunning: boolean;
-  /** Remaining time, already formatted. Only read when `hasTimer` is true. */
-  timerLabel: string;
-  /** A finished focus session closed this task. */
-  isLocked: boolean;
-  /**
-   * Whether the checkbox must not respond: a live timer in either direction, or a
-   * finished timer's lock on reopening.
-   */
-  completionDisabled: boolean;
-  onToggleComplete: () => void;
-  onStartFocus: () => void;
-  onToggleTimerRunning: () => void;
-  onStopTimer: () => void;
-  /**
-   * Opens the edit sheet for this task.
-   *
-   * Editing used to happen inline in the row — a `TextInput` that swapped in for the
-   * title. It could only ever hold the title, and the requirement is that a task's
-   * date, title and notes are all editable, so the sheet took it over: same three
-   * fields as creation, prefilled, one path for both. That leaves this component with
-   * no form state at all, which is what the `editing` props used to be.
-   */
-  onEdit: () => void;
-  onDelete: () => void;
-  /**
-   * Human-readable due date, e.g. `Due Fri`. Absent when the task has no date.
-   *
-   * Passed in already formatted rather than derived here: this component has no
-   * business calling `Date`, and the day key it would parse is deliberately
-   * timezone-free.
-   */
-  dueLabel?: string;
-  /**
-   * Whether that date is in the past. Only read when `dueLabel` is present.
-   *
-   * Passed in for the same reason as `dueLabel`: answering it needs today's day
-   * key, and the row has no clock. The controller derives it from the task, so
-   * the row only decides how an overdue date *looks*.
-   */
-  overdue: boolean;
-};
-
 export function TodoRow({
   todo,
   hasTimer,

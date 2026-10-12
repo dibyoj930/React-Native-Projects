@@ -2,15 +2,14 @@ import React, { useMemo } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import MaterialCommunityIcons from '@react-native-vector-icons/material-design-icons';
 
-import { goalsProgress, motivationFor, type DailyGoals } from '../daily-goals';
-import { MOMENTUM_BAND_LABELS, formatDuration, useProductivity } from '../productivity';
+import type { TodayViewModel } from '../hooks/useProductivityView';
 import { GoalMeter } from './GoalMeter';
 import { useTheme } from '../theme/useTheme';
 import type { Theme } from '../theme/theme';
 
 export type TodayCardProps = {
-  /** The user's saved targets; the tile measures today against them. */
-  goals: DailyGoals;
+  /** Everything the card prints, prepared above the view. */
+  model: TodayViewModel;
   /** Opens the Goals & Preferences screen. */
   onOpenGoals: () => void;
 };
@@ -34,24 +33,17 @@ export type TodayCardProps = {
  * track you can actually measure progress against.
  *
  * The whole tile is the way into the editor: tapping it opens the Goals &
- * Preferences screen rather than editing inline in a dialog. The goals arrive as
- * a prop, so the one source of truth lives above, where the screen that edits
- * them also reads it.
+ * Preferences screen rather than editing inline in a dialog.
+ *
+ * The card is a dumb view: it renders the `model` it is handed and reports the
+ * tap. How the model is put together — the momentum sentence, the `30m / 45m`
+ * readouts, the ratios, the encouragement line — lives in the productivity
+ * controller (`useProductivityView`), pure enough that the card's tests build a
+ * model without a provider.
  */
-export function TodayCard({ goals, onOpenGoals }: TodayCardProps) {
+export function TodayCard({ model, onOpenGoals }: TodayCardProps) {
   const t = useTheme();
   const styles = useMemo(() => createStyles(t), [t]);
-  const { snapshot } = useProductivity();
-
-  const { todayRollup, momentum } = snapshot;
-  const focusedSeconds = todayRollup?.focusedSeconds ?? 0;
-
-  // The targets are the user's saved goals, measured against today's rollup.
-  // They are deliberately *not* the mission ladder's targets: that ladder is a
-  // streak *difficulty* knob, not a statement about how much work a day holds,
-  // so it stays out of the display. `goalsProgress` clamps each ratio, so a goal
-  // passed by any margin fills its bar without overrunning the track.
-  const progress = goalsProgress(todayRollup, goals);
 
   return (
     <TouchableOpacity
@@ -67,7 +59,7 @@ export function TodayCard({ goals, onOpenGoals }: TodayCardProps) {
           above its own numbers. The chevron is the affordance that says the card
           is a way in. */}
       <View style={styles.headerRow}>
-        <Text style={styles.momentum}>{MOMENTUM_BAND_LABELS[momentum.band]}</Text>
+        <Text style={styles.momentum}>{model.momentumLabel}</Text>
         <MaterialCommunityIcons
           color={t.colors.textMuted}
           name="chevron-right"
@@ -77,21 +69,21 @@ export function TodayCard({ goals, onOpenGoals }: TodayCardProps) {
 
       <GoalMeter
         label="Focus time"
-        value={`${formatDuration(focusedSeconds)} / ${formatDuration(goals.focusMinutes * 60)}`}
-        ratio={progress.focusRatio}
+        value={model.focusLine}
+        ratio={model.focusRatio}
         tint={t.colors.primary}
       />
 
       <GoalMeter
         label="Tasks"
-        value={`${progress.tasksCompleted} / ${goals.tasksCompleted}`}
-        ratio={progress.tasksRatio}
-        tint={progress.tasksRatio >= 1 ? t.colors.primary : t.colors.textMuted}
+        value={model.tasksLine}
+        ratio={model.tasksRatio}
+        tint={model.tasksRatio >= 1 ? t.colors.primary : t.colors.textMuted}
       />
 
-      {/* The encouragement line, chosen from today's progress by a pure
-          selector — deterministic, and never a scold for a quiet day. */}
-      <Text style={styles.motivation}>{motivationFor(progress)}</Text>
+      {/* The encouragement line, chosen from today's progress by the controller —
+          deterministic, and never a scold for a quiet day. */}
+      <Text style={styles.motivation}>{model.motivation}</Text>
     </TouchableOpacity>
   );
 }
@@ -116,7 +108,7 @@ const createStyles = (t: Theme) =>
       gap: 8,
     },
     /**
-     * The encouragement line, which is the first thing the card says.
+     * The momentum sentence, which is the first thing the card says.
      *
      * Sits on its own row rather than beside the meters so a full sentence has
      * room to say itself without truncating.

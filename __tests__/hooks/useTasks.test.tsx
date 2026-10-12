@@ -11,7 +11,7 @@ import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-import { useTasks } from '../../todos/useTasks';
+import { useTasks } from '../../hooks/useTasks';
 import { TODOS_STORAGE_KEY, type Todo } from '../../todos/model';
 import { render } from '../support/render';
 

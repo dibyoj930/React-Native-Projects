@@ -1,11 +1,12 @@
 /**
  * Public surface of the daily-goals module.
  *
- * The pure half — types, validation, progress and the motivation line — is
- * storage-free and React-free; the hook is the only file that hydrates and
- * persists, and the editor UI lives in `components/GoalsScreen.tsx`. App code
- * imports from here; tests of the pure logic import `./goals` directly so they
- * cannot pick up storage.
+ * This module is the goal *domain*: the type, its validation, the progress maths
+ * and the motivation line — all storage-free and React-free. The controller that
+ * hydrates and persists goals lives with the other controllers in
+ * `hooks/useDailyGoals`, and the editor UI is `components/GoalsScreen.tsx`. App
+ * code imports the domain from here; tests of the pure logic import `./goals`
+ * directly so they cannot pick up storage.
  */
 
 export {
@@ -25,5 +26,3 @@ export {
 } from './goals';
 
 export { DAILY_GOALS_STORAGE_KEY, loadDailyGoals, saveDailyGoals } from './goalsStorage';
-
-export { useDailyGoals } from './useDailyGoals';

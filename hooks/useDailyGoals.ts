@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
 
-import { DEFAULT_DAILY_GOALS, type DailyGoals } from './goals';
-import { loadDailyGoals, saveDailyGoals } from './goalsStorage';
+import { DEFAULT_DAILY_GOALS, type DailyGoals } from '../daily-goals/goals';
+import { loadDailyGoals, saveDailyGoals } from '../daily-goals/goalsStorage';
 
 /**
  * The user's daily goals: state and persistence.
  *
- * Mirrors `todos/useCustomTags` — a plain hook, not a context, because the tile
+ * Mirrors `./useCustomTags` — a plain hook, not a context, because the tile
  * that reads it is the only consumer. Hydration is one read on mount; writes are
  * explicit and fire-and-forget, since the in-memory value is already correct and
  * a failed write is survivable.

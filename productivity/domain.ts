@@ -33,6 +33,22 @@ export {
 } from './dateKey';
 
 export {
+  buildFocusChart,
+  FOCUS_BAR_TRACK_HEIGHT,
+  FOCUS_BAR_WIDTH,
+  type FocusBarViewModel,
+  type FocusChartViewModel,
+} from './focusChart';
+
+export {
+  FOCUS_MILESTONE_START_MINUTES,
+  FOCUS_MILESTONE_STEP_MINUTES,
+  focusFillPercent,
+  focusTargetMinutes,
+  reachedMilestoneMinutes,
+} from './milestones';
+
+export {
   closeSession,
   focusedSecondsAt,
   nextSessionId,

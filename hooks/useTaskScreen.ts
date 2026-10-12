@@ -24,15 +24,15 @@ import { Alert, Share } from 'react-native';
 import { cancelTimerNotification, useNotifications } from '../notifications';
 import { formatDueLabel, todayKey, useProductivity } from '../productivity';
 import { triggerHaptic } from '../haptics';
-import type { TodoRowProps } from '../components/TodoRow';
+import type { TodoRowProps } from '../todos/rowViewModel';
 import type { Todo, TodoDraft } from '../todos/model';
 import { buildExportPayload, exportFilename } from '../todos/taskRepository';
 import { isCompletionDisabled, manualToggleStatus } from '../todos/taskRules';
 import { findTodo, isOverdue } from '../todos/taskSelectors';
 import type { TagOption } from '../todos/tags';
 import { formatTimeLabel } from '../todos/timeKey';
-import { useCustomTags } from '../todos/useCustomTags';
-import { useTasks } from '../todos/useTasks';
+import { useCustomTags } from './useCustomTags';
+import { useTasks } from './useTasks';
 import type { TimerState } from './useFocusTimer';
 import { useTaskReminders } from './useTaskReminders';
 import { useTimerOrchestration } from './useTimerOrchestration';
@@ -79,7 +79,7 @@ export type TaskScreen = {
 
 export function useTaskScreen(): TaskScreen {
   // Owning the list — state, load/save, create/edit/delete and the two
-  // completion writes — is `todos/useTasks`'s job. What stays here are the rules
+  // completion writes — is `./useTasks`'s job. What stays here are the rules
   // that need *both* sides: a timer and a task, a session log and a task.
   const {
     todos,

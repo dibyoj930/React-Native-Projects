@@ -6,10 +6,11 @@
  * how the app arrives at any of those states. No task rules, no navigation
  * state, no storage: the counts it prints come from the list it is handed.
  *
- * Two of the cards it composes (`TodayCard`, `ProductivityDashboard`) read the
- * productivity context themselves. That is their own choice and their own
- * documented exception, not a dependency this component adds; everything *it*
- * displays arrives as a prop.
+ * The two cards it composes (`TodayCard`, `ProductivityDashboard`) are the same
+ * kind of view: they render the models this screen passes down (the
+ * productivity controller in `hooks/useProductivityView` builds them), so
+ * nothing on the home screen reads a context or derives a productivity fact of
+ * its own — everything it displays arrives as a prop.
  */
 import React, { useCallback, useMemo, useState } from 'react';
 import {
@@ -25,7 +26,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ProductivityDashboard } from './ProductivityDashboard';
 import { TodayCard } from './TodayCard';
-import type { DailyGoals } from '../daily-goals';
+import type { HistoryViewModel, TodayViewModel } from '../hooks/useProductivityView';
 import type { Todo } from '../todos/model';
 import { accentFor, normalizeTagInput, tintOf, type TagOption } from '../todos/tags';
 import { openCount } from '../todos/taskSelectors';
@@ -59,10 +60,12 @@ export type HomeScreenProps = {
   onAddTask: () => void;
   /** Opens the settings screen. */
   onOpenSettings: () => void;
-  /** The user's saved targets, shown on the progress tile. */
-  goals: DailyGoals;
+  /** The Today tile's readout, prepared by the productivity controller. */
+  today: TodayViewModel;
   /** Opens the Goals & Preferences screen. */
   onOpenGoals: () => void;
+  /** The history panel's readout, prepared by the productivity controller. */
+  history: HistoryViewModel;
   /** Shares the list as JSON. No-op when there is nothing to export. */
   onExport: () => void;
 };
@@ -76,8 +79,9 @@ export function HomeScreen({
   onAddTag,
   onAddTask,
   onOpenSettings,
-  goals,
+  today,
   onOpenGoals,
+  history,
   onExport,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
@@ -196,7 +200,7 @@ export function HomeScreen({
             added — including ones completed weeks ago — and so answered a
             question nobody was asking. The whole tile opens the Goals &
             Preferences screen where its targets are edited. */}
-        <TodayCard goals={goals} onOpenGoals={onOpenGoals} />
+        <TodayCard model={today} onOpenGoals={onOpenGoals} />
 
         {/* Always here, between the two cards — and every tag is always here,
             not just the ones in use. A tag with nothing behind it opens an
@@ -265,7 +269,7 @@ export function HomeScreen({
 
         {/* Replaces the old `completedByTimer` progress bar, which was driven by
             a flag nothing ever set and so always rendered empty. */}
-        <ProductivityDashboard />
+        <ProductivityDashboard model={history} />
       </ScrollView>
 
       {/* Fixed footer: always anchored to the bottom of the screen, outside the

@@ -14,9 +14,9 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 
-import { nextTodoId, type Todo, type TodoDraft } from './model';
-import { applyDraftToTodo, createTodoFromDraft } from './taskOperations';
-import { loadTodos, saveTodos } from './taskRepository';
+import { nextTodoId, type Todo, type TodoDraft } from '../todos/model';
+import { applyDraftToTodo, createTodoFromDraft } from '../todos/taskOperations';
+import { loadTodos, saveTodos } from '../todos/taskRepository';
 
 export function useTasks() {
   const [todos, setTodos] = useState<Todo[]>([]);

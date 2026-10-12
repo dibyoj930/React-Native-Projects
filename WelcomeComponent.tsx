@@ -8,11 +8,8 @@ import { GoalsScreen } from './components/GoalsScreen';
 import { HomeScreen } from './components/HomeScreen';
 import { SettingsScreen } from './components/SettingsScreen';
 import { TodoRow } from './components/TodoRow';
-import { useDailyGoals } from './daily-goals';
-import type { TimerState } from './hooks/useFocusTimer';
-import { useSettings } from './hooks/useSettings';
-import { useTaskScreen } from './hooks/useTaskScreen';
-import { useProductivity } from './productivity';
+import { useDailyGoals, useProductivityView, useSettings, useTaskScreen } from './hooks';
+import type { TimerState } from './hooks';
 import type { Todo } from './todos/model';
 import { useTheme } from './theme/useTheme';
 import type { Theme } from './theme/theme';
@@ -115,9 +112,11 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
   // One hook call means one hydration and one in-memory source of truth.
   const { goals, setGoals } = useDailyGoals();
 
-  // Today's rollup feeds the tile and the goals preview from one place, so the
-  // screen can stay presentational.
-  const { snapshot } = useProductivity();
+  // The productivity controller turns the snapshot and the saved goals into the
+  // two cards' models from one place, so the screens stay presentational. The
+  // raw rollup is returned alongside for the goals screen, whose preview has to
+  // follow the draft rather than the saved goals.
+  const productivity = useProductivityView(goals);
 
   // The one renderer both lists share. It is a one-liner here rather than in the
   // controller because it is JSX: the controller answers "what are this row's
@@ -197,7 +196,7 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
             setGoals(next);
             onNavigate({ name: 'home' });
           }}
-          todayRollup={snapshot.todayRollup}
+          todayRollup={productivity.todayRollup}
         />
       </View>
     );
@@ -234,7 +233,8 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
     <View style={styles.screen}>
       <HomeScreen
         notificationsBlocked={notificationsBlocked}
-        goals={goals}
+        today={productivity.today}
+        history={productivity.history}
         onAddTag={addTag}
         onAddTask={openCreate}
         onExport={exportTodos}

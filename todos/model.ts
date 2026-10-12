@@ -8,7 +8,7 @@
  * of this file must not need a renderer.
  */
 
-import { isValidDayKey, type DayKey } from '../productivity';
+import { isValidDayKey, type DayKey } from '../shared/date';
 import { isValidTimeKey, type TimeKey } from './timeKey';
 
 export type Todo = {
@@ -46,7 +46,7 @@ export type Todo = {
    *  - lexicographic order on a day key *is* chronological order, so every
    *    future filter (`dueDate >= today`, `dueDate === addDays(today, 1)`) is
    *    plain string comparison with no `Date` parsing and no timezone involved.
-   *    An epoch would reintroduce exactly the UTC drift that `dateKey.ts`
+   *    An epoch would reintroduce exactly the UTC drift that `shared/date.ts`
    *    documents, where a task completed at 9pm IST lands on the previous day.
    *
    * Absent means "no date" and must stay distinguishable from today, or "upcoming"

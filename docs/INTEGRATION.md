@@ -76,7 +76,7 @@ app is testable without a binary.
 | Native module | Sole boundary | Notes |
 | --- | --- | --- |
 | `@notifee/react-native` | `notifications/notificationService.ts` | Scheduled triggers, permission, initial notification, foreground events |
-| `@react-native-async-storage/async-storage` | `todos/taskRepository.ts`, `productivity/storage.ts`, `theme/ThemeProvider.tsx` | One of three independent keys each |
+| `@react-native-async-storage/async-storage` | `todos/taskRepository.ts`, `productivity/storage.ts`, `theme/ThemeProvider.tsx`, `hooks/useCustomTags.ts`, `daily-goals/goalsStorage.ts` | Five independent keys (§4) |
 | `@react-native-community/datetimepicker` | `components/AddTodoModal.tsx` | `mode="date"` and `mode="time"` |
 | `react-native-timer-picker` | `WelcomeComponent.tsx` | Focus-duration picker |
 | `react-native-gesture-handler` | `App.tsx`, `components/SwipeableTodoRow.tsx` | Gesture root + swipe actions |
@@ -98,7 +98,7 @@ one never touches another.
 | `todos/taskRepository.ts` | `todos` (`TODOS_STORAGE_KEY`) | `saveTodos` |
 | `productivity/storage.ts` | `@productivity/v1` | debounced `saveProductivity` |
 | `theme/ThemeProvider.tsx` | `@theme/preference` | the appearance control |
-| `todos/useCustomTags.ts` | `customTags` (`CUSTOM_TAGS_STORAGE_KEY`) | `addTag` |
+| `hooks/useCustomTags.ts` | `customTags` (`CUSTOM_TAGS_STORAGE_KEY`) | `addTag` |
 | `daily-goals/goalsStorage.ts` | `@daily-goals/v1` | `saveDailyGoals` |
 
 Every read is defensive: a missing key, non-array/non-object JSON, or a read
@@ -122,14 +122,14 @@ app is not foregrounded.
 
 ## 4. Storage contract
 
-Three independent AsyncStorage keys. Clearing one never touches another.
+Five independent AsyncStorage keys. Clearing one never touches another.
 
 | Key | Owner | Shape | Repair on load |
 | --- | --- | --- | --- |
 | `todos` (`TODOS_STORAGE_KEY`) | `todos/taskRepository.ts` | `Todo[]` | `migrateTodos` |
 | `@productivity/v1` | `productivity/storage.ts` | `{ sessions, ledger, memory }` | per-field sanitising |
 | `@theme/preference` | `theme/ThemeProvider.tsx` | `'system' \| 'light' \| 'dark'` | falls back to `system` |
-| `customTags` (`CUSTOM_TAGS_STORAGE_KEY`) | `todos/useCustomTags.ts` | `string[]` | normalised, deduplicated, stripped |
+| `customTags` (`CUSTOM_TAGS_STORAGE_KEY`) | `hooks/useCustomTags.ts` | `string[]` | normalised, deduplicated, stripped |
 | `@daily-goals/v1` | `daily-goals/goalsStorage.ts` | `{ focusMinutes, tasksCompleted }` | field-by-field via `sanitizeGoals` |
 
 ### `todos`

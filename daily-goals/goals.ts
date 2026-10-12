@@ -8,8 +8,9 @@ import type { DayRollup } from '../productivity/domain';
  * Pure on purpose — no React, no storage. Everything here is a function over
  * plain values, so the validation, the progress maths and the encouragement line
  * are all testable without mounting anything. `goalsStorage.ts` is the only file
- * in this folder that touches AsyncStorage, and `useDailyGoals` is the only one
- * that touches React.
+ * in this folder that touches AsyncStorage; the controller that hydrates and
+ * persists through it (`useDailyGoals`) lives with the other controllers in
+ * `hooks/`.
  *
  * These goals replace the *display* targets on the home tile only. The mission
  * ladder still decides the streak and momentum, because those are a difficulty

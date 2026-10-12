@@ -7,8 +7,8 @@
  * no fake timers, no simulator.
  */
 
-/** `YYYY-MM-DD` in the device's *local* calendar. See `dateKey.ts`. */
-export type DayKey = string;
+/** `YYYY-MM-DD` in the device's *local* calendar. See `shared/date.ts`. */
+export type { DayKey } from '../shared/date';
 
 /**
  * Why a focus session ended.

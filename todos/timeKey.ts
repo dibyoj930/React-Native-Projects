@@ -6,7 +6,7 @@
  * — `dueDate` and `dueTime` — and only combine into an instant when a reminder
  * needs scheduling, so neither has to pretend to be the other.
  *
- * Kept as a string rather than an epoch for the reason `dateKey.ts` keeps day
+ * Kept as a string rather than an epoch for the reason `shared/date.ts` keeps day
  * keys as strings: a stored wall-clock time never goes stale across a timezone
  * change, and it stays readable in storage and in an export.
  *

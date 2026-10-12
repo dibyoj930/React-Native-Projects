@@ -62,7 +62,8 @@ memory or under a small set of `AsyncStorage` keys (see
   set in **Goals & Preferences**.
 - **Streak** — current, best, and remaining freezes.
 - **Recent focus** — a 7-day chart: tap a bar to fill it green and see that day's
-  time and task count; bars are sized to your biggest focus day.
+  time and task count; bars scale to the next focus milestone (starting at 6h,
+  stepping +2h), and reaching one celebrates and raises the bar.
 
 ### Tags
 - A built-in vocabulary plus **your own tags**, added right from the home screen.

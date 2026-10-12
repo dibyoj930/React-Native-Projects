@@ -17,6 +17,7 @@ import {
   openCount,
   searchTodos,
   tagsInUse,
+  taskListSummary,
 } from '../../todos/taskSelectors';
 import type { Todo } from '../../todos/model';
 
@@ -174,5 +175,53 @@ describe('taskSelectors — grouping', () => {
 
   it('returns no groups for no tasks', () => {
     expect(groupTodos([], TODAY)).toEqual([]);
+  });
+});
+
+describe('taskSelectors — the list summary', () => {
+  it('counts what is open against the filtered list', () => {
+    const filtered = [todo({ id: 'a' }), todo({ id: 'b' }), todo({ id: 'c', completed: true })];
+    expect(taskListSummary(filtered, filtered, undefined).subtitle).toBe('2 open of 3');
+  });
+
+  it('says every task is done when none are open', () => {
+    const filtered = [todo({ id: 'a', completed: true }), todo({ id: 'b', completed: true })];
+    expect(taskListSummary(filtered, filtered, undefined).subtitle).toBe('All 2 done');
+  });
+
+  it('reads `Nothing yet` for a truly empty list', () => {
+    expect(taskListSummary([], [], undefined).subtitle).toBe('Nothing yet');
+  });
+
+  it('has no empty state while there are rows to show', () => {
+    const filtered = [todo({ id: 'a' })];
+    expect(taskListSummary(filtered, filtered, undefined).emptyState).toBeNull();
+  });
+
+  it('invites the first task when the whole list is empty', () => {
+    const { emptyState } = taskListSummary([], [], undefined);
+    expect(emptyState?.title).toBe('No tasks yet');
+    expect(emptyState?.body).toBe(
+      'Anything you add shows up here, whether or not it has a date.',
+    );
+  });
+
+  it('names the tag when a tag view has no tasks', () => {
+    const { emptyState } = taskListSummary([], [], '#gym');
+    expect(emptyState?.title).toBe('No Todos yet');
+    expect(emptyState?.body).toBe(
+      'Tap + to add the first #gym task — it is created already tagged.',
+    );
+  });
+
+  it('tells a search apart from an empty tag', () => {
+    // `base` still has tasks; only the search emptied the `filtered` list.
+    const base = [todo({ id: 'a' }), todo({ id: 'b' })];
+    const { subtitle, emptyState } = taskListSummary([], base, undefined);
+    expect(subtitle).toBe('Nothing yet');
+    expect(emptyState?.title).toBe('No matches');
+    expect(emptyState?.body).toBe(
+      'Nothing here fits that search. Clear it to see every task again.',
+    );
   });
 });

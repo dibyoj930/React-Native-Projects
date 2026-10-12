@@ -8,7 +8,8 @@
 
 import React from 'react';
 import { StyleSheet } from 'react-native';
-import { TodoRow, type TodoRowProps } from '../../components/TodoRow';
+import { TodoRow } from '../../components/TodoRow';
+import type { TodoRowProps } from '../../todos/rowViewModel';
 import type { Todo } from '../../todos/model';
 import { lightTheme } from '../../theme/theme';
 import { byLabel, hostNodes, labels, nodes, press, textContent, visibleText, withRendered } from '../support/render';

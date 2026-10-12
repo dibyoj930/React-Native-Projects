@@ -46,9 +46,11 @@ tests and the module layout both assume them.
                     └───────────────┬──────────────────────────────┘
                                     │ reads controllers
                     ┌───────────────▼──────────────────────────────┐
-   Controllers      │  hooks/useTaskScreen   hooks/useSettings       │
-   (impure)         │  hooks/useTimerOrchestration, useFocusTimer    │
-                    │  hooks/useReminders, useTaskReminders          │
+   Controllers      │  hooks/useTaskScreen   useProductivityView     │
+   (impure)         │  useTimerOrchestration, useFocusTimer          │
+                    │  useReminders, useTaskReminders                │
+                    │  useTasks, useCustomTags, useDailyGoals         │
+                    │  useSettings                                   │
                     └───────┬───────────┬──────────┬───────────────┘
                             │           │          │
         ┌───────────────────▼──┐  ┌─────▼───────┐  ┌▼─────────────────┐
@@ -60,6 +62,10 @@ tests and the module layout both assume them.
    Adapters         │  AsyncStorage (3 keys)   Notifee (OS triggers) │
                     └───────────────────────────────────────────────┘
 ```
+
+`shared/date.ts` is a pure leaf under both `todos/` and `productivity/`: the local
+day-key type and date maths both domains need, owned by neither. A controller is
+a hook in `hooks/` — the domain modules no longer hold any.
 
 The rule of thumb: a **component** renders, a **controller** decides across
 domains, a **domain module** is pure and testable without a renderer, and an
@@ -79,8 +85,11 @@ domains, a **domain module** is pure and testable without a renderer, and an
 | `timeKey.ts` | `'HH:mm'` validation, `timeKeyFromDate`, `formatTimeLabel` | ✅ |
 | `taskReminders.ts` | `dueAt`, `planTaskReminders` (which reminders to schedule) | ✅ |
 | `tags.ts` | Tag vocabulary + accent/tint/contrast helpers | pure (colour literals exempt) |
+| `rowViewModel.ts` | `TodoRowProps` — the contract a row's controller builds to | ✅ |
 | `taskRepository.ts` | Load/save `Todo[]`, `buildExportPayload`, filename | impure (AsyncStorage) |
-| `useTasks.ts` | List state + CRUD + load/save guard | React hook |
+
+The list's state and persistence are a controller (`hooks/useTasks`), not a domain
+file: nothing under `todos/` is a React hook any more.
 
 The `Todo` is the app's central record: `id`, `text`, `completed`, optional
 `tags`, `createdAt`, `completedAt`, `notes`, `dueDate` (`DayKey`), and `dueTime`
@@ -93,7 +102,9 @@ The focus log and everything derived from it. `productivity/domain.ts` is the
 pure barrel (no React Native, no storage) re-exported by `productivity/index.ts`
 alongside the provider.
 
-- `dateKey.ts` — local day keys, `todayKey`, `addDays`, `localDateFromDayKey`.
+- `dateKey.ts` — re-exports `shared/date.ts` (local day keys, `todayKey`, `addDays`).
+- `focusChart.ts` — the focus chart's bar view model (`buildFocusChart`).
+- `milestones.ts` — the focus-milestone ladder (`focusTargetMinutes`, `focusFillPercent`).
 - `sessions.ts` — start/pause/resume/close session math.
 - `attribution.ts` — joins sessions to tasks ("was this completed by the timer?").
 - `rollups.ts`, `streak.ts`, `momentum.ts`, `mission.ts` — derived statistics.
@@ -126,7 +137,7 @@ library and is optional at runtime.
 
 | Fact | Owner | Persisted? |
 |---|---|---|
-| Task list | `todos/useTasks` (`useState`) | `todos` key |
+| Task list | `hooks/useTasks` (`useState`) | `todos` key |
 | Focus sessions, streak ledger, momentum memory | `ProductivityProvider` (`useReducer`) | `productivity` key |
 | Focus timers (running/paused) | `useFocusTimer` (refs + mirrored state) | OS trigger only |
 | Active/edit sheet visibility | `hooks/useTaskScreen` | no |
@@ -134,7 +145,7 @@ library and is optional at runtime.
 | Notification permission + banner | `NotificationProvider` | no (asked each launch) |
 | Pending reminders (daily/streak) | Notifee, reconciled by `useReminders` | OS triggers |
 | Per-task reminders | Notifee, reconciled by `useTaskReminders` | OS triggers |
-| Daily goals | `useDailyGoals` in `WelcomeComponent` | `@daily-goals/v1` key |
+| Daily goals | `hooks/useDailyGoals` in `WelcomeComponent` | `@daily-goals/v1` key |
 | Goals draft (unsaved fields) | `GoalsScreen` local state | no |
 | Theme override | `ThemeProvider` | `theme.preference` key |
 | Editing draft + modal form | `AddTodoModal` local state | n/a |
@@ -164,6 +175,10 @@ and rendered in every branch, so they cannot drift between screens.
 
 ## Controllers
 
+`hooks/` holds every controller; `hooks/index.ts` is the layer's public surface,
+which the composition point imports. Inside the folder, a controller imports its
+siblings by path so the graph stays visible.
+
 - **`useTaskScreen`** is the primary container. It composes `useTasks`,
   `useTimerOrchestration`, `useProductivity`, and `useTaskReminders`, then owns
   the rules that span them: timer expiry completes its task and closes the
@@ -180,6 +195,9 @@ and rendered in every branch, so they cannot drift between screens.
 - `useDailyGoals` owns the user's daily targets: one hydration, one in-memory
   value shared by the home tile and the Goals & Preferences screen, and
   fire-and-forget writes under the `@daily-goals/v1` key.
+- `useProductivityView` turns the productivity snapshot and the saved goals into
+  the two home cards' models (`TodayViewModel`, `HistoryViewModel`), so
+  `TodayCard` and `ProductivityDashboard` stay presentational.
 - `useSettings` owns confirmations and cross-domain resets for the Settings
   screen.
 
@@ -253,11 +271,23 @@ These are the rules most likely to be broken by a well-meaning change:
    A reader must only match its own key.
 4. **`Notifee` repeating triggers are Android-only**, so every reminder is a
    one-shot timestamp reconciled on each relevant change.
-5. **Storage keys are independent** (`todos`, `productivity`, theme preference):
-   clearing one never touches another.
+5. **Storage keys are independent** (`todos`, `productivity`, theme preference,
+   custom tags, daily goals): clearing one never touches another.
 6. **Components hold no colours**; `theme.test.ts` enforces it over the source.
 7. **No router, no new state library.** Four screens and one flat reducer do not
    need either.
+
+## Known follow-ups
+
+Two presentational strings were deliberately left in place: each needs a copy
+decision before it needs a selector, so moving them would have been motion
+without a test behind it.
+
+1. **The home screen's task tile title.** `HomeScreen` still writes the
+   `All tasks` / `1 open of N` line inline. The wording (and its pluralisation)
+   belongs next to the other list copy in `todos/taskSelectors` once it settles.
+2. **The Goals editor's preview copy.** `GoalsScreen` builds its preview strings
+   inline; their natural home is beside `motivationFor` in `daily-goals/goals.ts`.
 
 ## Testing strategy
 
