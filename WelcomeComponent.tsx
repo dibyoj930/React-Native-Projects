@@ -6,9 +6,10 @@ import { AddTodoModal } from './components/AddTodoModal';
 import { AllTasksScreen } from './components/AllTasksScreen';
 import { GoalsScreen } from './components/GoalsScreen';
 import { HomeScreen } from './components/HomeScreen';
+import { ReplanScreen } from './components/ReplanScreen';
 import { SettingsScreen } from './components/SettingsScreen';
 import { TodoRow } from './components/TodoRow';
-import { useDailyGoals, useProductivityView, useSettings, useTaskScreen } from './hooks';
+import { useDailyGoals, useProductivityView, useReplan, useSettings, useTaskScreen } from './hooks';
 import type { TimerState } from './hooks';
 import type { Todo } from './todos/model';
 import { useTheme } from './theme/useTheme';
@@ -47,6 +48,7 @@ export type Screen =
   | { name: 'tasks' }
   | { name: 'tag'; tag: string }
   | { name: 'goals' }
+  | { name: 'replan' }
   | { name: 'settings' };
 
 export type WelcomeComponentProps = {
@@ -81,6 +83,9 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
   const {
     todos,
     today,
+    hydrated,
+    anyTimerRunning,
+    timerWindowFor,
     notificationsBlocked,
     editingTodo,
     showTaskSheet,
@@ -89,6 +94,7 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
     handleTimerConfirm,
     handleTimerCancel,
     openCreate,
+    openEdit,
     closeTaskSheet,
     submitTask,
     exportTodos,
@@ -118,10 +124,20 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
   // follow the draft rather than the saved goals.
   const productivity = useProductivityView(goals);
 
+  // The replan controller owns the proposal, the approved plan and the
+  // preferences. Mounted here because it needs the task list and the timer
+  // windows that `useTaskScreen` holds, and because the approved plan is read by
+  // the rows below. It reconciles its own planned-start reminders.
+  const replan = useReplan({ todos, hydrated, today, timerWindowFor });
+
   // The one renderer both lists share. It is a one-liner here rather than in the
   // controller because it is JSX: the controller answers "what are this row's
-  // props", and the view is what turns that into an element.
-  const renderRow = (todo: Todo) => <TodoRow {...rowPropsFor(todo)} />;
+  // props", and the view is what turns that into an element. The approved plan
+  // window is bound here rather than in `rowPropsFor`, so the task controller
+  // stays unaware of the replan layer.
+  const renderRow = (todo: Todo) => (
+    <TodoRow {...rowPropsFor(todo)} plannedLabel={replan.plannedLabelFor(todo.id)} />
+  );
 
   // Both sheets are built here, outside the branch, and rendered in both screens.
   // The add sheet has to work from either screen — you can be mid-focus with the
@@ -202,6 +218,34 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
     );
   }
 
+  if (screen.name === 'replan') {
+    // Its own destination, back to home, like Goals and Settings. It holds no
+    // scheduling state of its own: the controller above owns the proposal and
+    // the preferences, and this only renders them and reports intent.
+    return (
+      <View style={styles.screen}>
+        <ReplanScreen
+          proposal={replan.proposal}
+          preferences={replan.preferences}
+          tasksById={replan.tasksById}
+          stale={replan.stale}
+          onGenerate={replan.generate}
+          onApply={() => {
+            // The screen's `onApply` is fire-and-forget; a rejected write must not
+            // surface as an unhandled rejection. Apply itself already refuses
+            // quietly when the state has moved on.
+            replan.apply().catch(() => {});
+          }}
+          onCancel={replan.cancel}
+          onSetPreferences={replan.setPreferences}
+          onEditTask={openEdit}
+          onBack={() => onNavigate({ name: 'home' })}
+        />
+        {sheets}
+      </View>
+    );
+  }
+
   if (screen.name !== 'home') {
     // A full screen swap rather than a `Modal`. It is the app's only task list, so
     // it is a destination with somewhere to come back to, not a layer over the
@@ -240,6 +284,8 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
         onExport={exportTodos}
         onOpenGoals={() => onNavigate({ name: 'goals' })}
         onOpenSettings={() => onNavigate({ name: 'settings' })}
+        onOpenReplan={() => onNavigate({ name: 'replan' })}
+        replanAvailable={!anyTimerRunning}
         onOpenTag={(tag) => onNavigate({ name: 'tag', tag })}
         onOpenTasks={() => onNavigate({ name: 'tasks' })}
         tags={tags}

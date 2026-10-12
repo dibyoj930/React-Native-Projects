@@ -1,9 +1,9 @@
 # MyApp
 
 A **local-first React Native productivity app**: a task list with per-task focus
-timers, OS notifications, and a focus-session history with streaks and momentum.
-No backend, no accounts — every fact the app renders lives on the device, in
-memory or under a small set of `AsyncStorage` keys (see
+timers, OS notifications, adaptive daily planning, and a focus-session history
+with streaks and momentum. No backend, no accounts — every fact the app renders
+lives on the device, in memory or under a small set of `AsyncStorage` keys (see
 [`docs/INTEGRATION.md`](docs/INTEGRATION.md) for the full list).
 
 <p align="center">
@@ -45,6 +45,18 @@ memory or under a small set of `AsyncStorage` keys (see
 - Timers **survive a relaunch**: they are restored from the OS notification that
   is still pending, and a past end time is treated as an expiry.
 
+### Adaptive daily planning
+- A **"Replan my day"** screen fits your open tasks into the time you actually
+  have left, around fixed commitments, a configurable buffer, and a break.
+- Each task can carry an optional **priority** and **estimate**; the planner
+  schedules higher-priority work first, never before *now*, and never overlaps.
+- It **never changes a deadline** and never presents a post-deadline finish as
+  on-time; anything that does not fit is reported, not silently dropped.
+- A running **focus timer is protected** — the entry is hidden while one runs, so
+  a rebuild can never move the session you are in the middle of.
+- The approved plan shows on each task row, and (opt-in) can notify you when a
+  planned block is due to start.
+
 ### Notifications & reminders
 - **Timer alerts** — tapping one opens the task it belongs to.
 - **Daily focus prompt** (09:00 local, a 7-day rolling window).
@@ -85,8 +97,8 @@ memory or under a small set of `AsyncStorage` keys (see
 
 ### Local-first & export
 - Everything persists to `AsyncStorage` under a small set of independent keys
-  (tasks, productivity, theme preference, custom tags, and daily goals);
-  clearing one never touches another.
+  (tasks, productivity, theme preference, custom tags, daily goals, and the
+  approved daily plan); clearing one never touches another.
 - **Export/share** the task list as JSON from the home screen, named by the local
   day (never a UTC day).
 
@@ -173,14 +185,14 @@ Thin containers, dumb UI, and pure domain logic — see
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the full model.
 
 ```
-App.tsx              providers + Screen navigation (home | tasks | tag | goals | settings)
-WelcomeComponent     composition point for the five screens
+App.tsx              providers + Screen navigation (home | tasks | tag | goals | replan | settings)
+WelcomeComponent     composition point for the six screens
 components/*         presentational screens and rows
-hooks/*              controllers (useTaskScreen, useSettings, useTimerOrchestration, …)
-todos/ productivity/ notifications/ domain + adapters (pure where it can be)
+hooks/*              controllers (useTaskScreen, useReplan, useSettings, useTimerOrchestration, …)
+todos/ productivity/ replan/ notifications/ domain + adapters (pure where it can be)
 ```
 
-- **No router and no state library** — five screens and one flat reducer are
+- **No router and no state library** — six screens and one flat reducer are
   enough; navigation is a single `Screen` union.
 - **One source of truth per fact** — the OS owns scheduled work, derived values
   are computed on read, and persistence sits behind a repository boundary.

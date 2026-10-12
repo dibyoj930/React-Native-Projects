@@ -57,9 +57,9 @@ function App() {
 /**
  * Owns which screen is showing.
  *
- * This is the app's entire navigation: one piece of state with five values, held
+ * This is the app's entire navigation: one piece of state with six values, held
  * above the component that needs it. There is no router here and none is warranted
- * — five destinations do not need a stack, a back stack or a dependency, and the
+ * — six destinations do not need a stack, a back stack or a dependency, and the
  * screens swap by rendering one or the other.
  *
  * The state lives out here rather than inside `WelcomeComponent` because that

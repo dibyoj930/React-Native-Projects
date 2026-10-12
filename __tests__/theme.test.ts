@@ -37,6 +37,8 @@ const THEMED_SOURCES = [
   join('components', 'GoalsScreen.tsx'),
   join('components', 'ProductivityDashboard.tsx'),
   join('components', 'SettingsScreen.tsx'),
+  join('components', 'ReplanScreen.tsx'),
+  join('components', 'ReplanTimeline.tsx'),
 ];
 
 /**
@@ -127,6 +129,7 @@ describe('theme discipline', () => {
     const known = [
       'TodoRow', 'AllTasksScreen', 'AddTodoModal', 'HomeScreen', 'TodayCard',
       'GoalMeter', 'GoalsScreen', 'ProductivityDashboard', 'SettingsScreen',
+      'ReplanScreen', 'ReplanTimeline',
     ];
     expect(THEMED_SOURCES.filter((p) => p.startsWith('components'))).toHaveLength(
       known.length,

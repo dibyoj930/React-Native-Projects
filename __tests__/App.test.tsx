@@ -14,7 +14,7 @@ import ReactTestRenderer from 'react-test-renderer';
 import notifee, { EventType } from '@notifee/react-native';
 
 import App from '../App';
-import { press, typeText, visibleText } from './support/render';
+import { labels, press, typeText, visibleText } from './support/render';
 
 test('mounts the full app tree', async () => {
   let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
@@ -62,6 +62,38 @@ test('opens the task list when a timer notification is tapped', async () => {
   });
 
   expect(visibleText(renderer!)).toContain('All tasks');
+
+  await ReactTestRenderer.act(async () => {
+    renderer!.unmount();
+  });
+});
+
+test('reaches the replan screen, builds a plan and returns', async () => {
+  // The wiring test: the home entry opens the screen, the screen builds a
+  // proposal from the task list, and Back returns to the dashboard. Whether a
+  // task actually fits is the engine's business and is covered deterministically
+  // under fake timers; this only guards that the pieces are connected.
+  let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+
+  await ReactTestRenderer.act(async () => {
+    renderer = ReactTestRenderer.create(<App />);
+  });
+  await ReactTestRenderer.act(async () => {
+    await Promise.resolve();
+  });
+
+  expect(visibleText(renderer!)).toContain('Replan my day');
+  await press(renderer!, 'Replan my day');
+  // Before a build the screen offers to build one.
+  expect(visibleText(renderer!)).toContain('Build a plan');
+
+  await press(renderer!, 'Build a plan');
+  // A proposal exists: the summary is drawn and applying is offered.
+  expect(visibleText(renderer!)).toContain('Nothing to change');
+  expect(labels(renderer!)).toContain('Apply plan');
+
+  await press(renderer!, 'Back to today');
+  expect(visibleText(renderer!)).toContain('Replan my day');
 
   await ReactTestRenderer.act(async () => {
     renderer!.unmount();

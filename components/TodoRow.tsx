@@ -51,6 +51,7 @@ export function TodoRow({
   onDelete,
   dueLabel,
   overdue,
+  plannedLabel,
 }: TodoRowProps) {
   const t = useTheme();
   // Theme-derived, so built per theme rather than at module scope.
@@ -116,7 +117,10 @@ export function TodoRow({
               The lock badge is the reason the checkbox above stops responding;
               without it a finished timer reads as a broken tap, so it belongs on
               the same line as the date and timer it explains. */}
-          {((dueLabel && !todo.completed) || hasTimer || isLocked) && (
+          {((dueLabel && !todo.completed) ||
+            (plannedLabel && !todo.completed) ||
+            hasTimer ||
+            isLocked) && (
             <View style={styles.metaLine}>
               {dueLabel && !todo.completed && (
                 <View style={styles.metaItem}>
@@ -128,6 +132,21 @@ export function TodoRow({
                   <Text style={[styles.dueText, overdue && styles.dueTextOverdue]}>
                     {dueLabel}
                   </Text>
+                </View>
+              )}
+
+              {/* The approved plan for today. A clock rather than the calendar
+                  used by the due date, and in the primary colour rather than the
+                  muted one, so a suggested window reads as distinct from a
+                  deadline the user set — they are different promises. */}
+              {plannedLabel && !todo.completed && (
+                <View style={styles.metaItem}>
+                  <MaterialCommunityIcons
+                    name="clock-outline"
+                    size={12}
+                    color={t.colors.primary}
+                  />
+                  <Text style={styles.plannedText}>{plannedLabel}</Text>
                 </View>
               )}
 
@@ -360,6 +379,18 @@ const createStyles = (t: Theme) => {
      */
     dueTextOverdue: {
       color: c.danger,
+      fontWeight: '600',
+    },
+    /**
+     * The approved plan window.
+     *
+     * Primary-coloured and weighted, unlike the muted due date: it is the app's
+     * own suggestion, so it should read as a plan rather than as another fact the
+     * user wrote down.
+     */
+    plannedText: {
+      fontSize: 12,
+      color: c.primary,
       fontWeight: '600',
     },
     timerText: {

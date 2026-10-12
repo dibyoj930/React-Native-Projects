@@ -8,6 +8,7 @@
 
 import {
   DAILY_REMINDER_WINDOW,
+  isDailyOrStreakReminderId,
   planReminders,
 } from '../../notifications/reminderPlan';
 
@@ -66,5 +67,23 @@ describe('planReminders — streak warning', () => {
   it('omits the warning once its hour has passed', () => {
     const plan = planReminders({ now: at(4, 21), streak: 4, todayComplete: false });
     expect(plan.some((reminder) => reminder.id.startsWith('streak-'))).toBe(false);
+  });
+});
+
+describe('isDailyOrStreakReminderId', () => {
+  it('owns the daily and streak namespaces', () => {
+    expect(isDailyOrStreakReminderId('daily-2026-05-04')).toBe(true);
+    expect(isDailyOrStreakReminderId('streak-2026-05-04')).toBe(true);
+  });
+
+  it('leaves the planned-start namespace to the replan layer', () => {
+    // `usePlanReminders` shares the reminder data key; the daily/streak
+    // reconciler must not cancel its `plan-<taskId>` reminders.
+    expect(isDailyOrStreakReminderId('plan-task-1')).toBe(false);
+  });
+
+  it('owns nothing else', () => {
+    expect(isDailyOrStreakReminderId('timer-task-1')).toBe(false);
+    expect(isDailyOrStreakReminderId('')).toBe(false);
   });
 });

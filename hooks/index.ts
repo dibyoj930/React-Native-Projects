@@ -7,17 +7,18 @@
  * imports from here; a controller inside this folder imports its siblings by
  * path, so the dependency graph stays visible where it matters.
  *
- * The two replan controllers (`useReplan`, `usePlanReminders`) are deliberately
- * not listed yet: their files currently export only their contracts — the hook
- * bodies are still to be written — so there is no controller to re-export. Add
- * them here when the implementations land.
+ * The two replan controllers (`useReplan`, `usePlanReminders`) live here with
+ * the rest: the replan document hydrates through `useReplan`, and the approved
+ * plan's start reminders reconcile through it too.
  */
 
 export * from './useCustomTags';
 export * from './useDailyGoals';
 export * from './useFocusTimer';
+export * from './usePlanReminders';
 export * from './useProductivityView';
 export * from './useReminders';
+export * from './useReplan';
 export * from './useSettings';
 export * from './useTaskReminders';
 export * from './useTaskScreen';

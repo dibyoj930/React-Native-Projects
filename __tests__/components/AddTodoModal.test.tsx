@@ -690,6 +690,85 @@ describe('AddTodoModal — the # tag button', () => {
   });
 });
 
+describe('AddTodoModal — priority and estimate', () => {
+  it('stores neither unless the user chooses one', async () => {
+    const onSubmit = jest.fn<void, [TodoDraft]>();
+    await withRendered(element({ onSubmit }), async (renderer) => {
+      await type(renderer, 'Task title', 'Buy milk');
+      await press(renderer, 'Add task');
+    });
+    const draft = persisted(onSubmit.mock.calls[0][0]);
+    expect(draft).not.toHaveProperty('priority');
+    expect(draft).not.toHaveProperty('estimatedMinutes');
+  });
+
+  it('starts both on None, so an untouched task is not silently important', async () => {
+    await withRendered(element(), (renderer) => {
+      expect(byLabel(renderer, 'Priority: None').props.accessibilityState).toEqual({
+        selected: true,
+      });
+      expect(byLabel(renderer, 'Estimate: None').props.accessibilityState).toEqual({
+        selected: true,
+      });
+    });
+  });
+
+  it('hands the chosen priority to the draft', async () => {
+    const onSubmit = jest.fn<void, [TodoDraft]>();
+    await withRendered(element({ onSubmit }), async (renderer) => {
+      await type(renderer, 'Task title', 'Ship the release');
+      await press(renderer, 'Priority: High');
+      await press(renderer, 'Add task');
+    });
+    expect(persisted(onSubmit.mock.calls[0][0]).priority).toBe('high');
+  });
+
+  it('hands the chosen estimate, in whole minutes, to the draft', async () => {
+    const onSubmit = jest.fn<void, [TodoDraft]>();
+    await withRendered(element({ onSubmit }), async (renderer) => {
+      await type(renderer, 'Task title', 'Write the report');
+      await press(renderer, 'Estimate: 45m');
+      await press(renderer, 'Add task');
+    });
+    expect(persisted(onSubmit.mock.calls[0][0]).estimatedMinutes).toBe(45);
+  });
+
+  it('lets a choice be taken back to None', async () => {
+    const onSubmit = jest.fn<void, [TodoDraft]>();
+    await withRendered(element({ onSubmit }), async (renderer) => {
+      await type(renderer, 'Task title', 'Buy milk');
+      await press(renderer, 'Priority: Low');
+      await press(renderer, 'Priority: None');
+      await press(renderer, 'Estimate: 15m');
+      await press(renderer, 'Estimate: None');
+      await press(renderer, 'Add task');
+    });
+    const draft = persisted(onSubmit.mock.calls[0][0]);
+    expect(draft).not.toHaveProperty('priority');
+    expect(draft).not.toHaveProperty('estimatedMinutes');
+  });
+
+  it('prefills the task being edited with its own priority and estimate', async () => {
+    const TASK: Todo = {
+      id: 't9',
+      text: 'Write the report',
+      completed: false,
+      tags: [],
+      createdAt: 1,
+      priority: 'high',
+      estimatedMinutes: 45,
+    };
+    await withRendered(element({ task: TASK }), (renderer) => {
+      expect(byLabel(renderer, 'Priority: High').props.accessibilityState).toEqual({
+        selected: true,
+      });
+      expect(byLabel(renderer, 'Estimate: 45m').props.accessibilityState).toEqual({
+        selected: true,
+      });
+    });
+  });
+});
+
 describe('AddTodoModal — lifecycle', () => {
   it('does not draw the form when closed', async () => {
     // Otherwise the sheet's fields and placeholders sit in the tree from first

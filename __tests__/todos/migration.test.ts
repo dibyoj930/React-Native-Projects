@@ -72,12 +72,69 @@ describe('migrateTodos — legacy tasks', () => {
         'createdAt',
         'dueDate',
         'dueTime',
+        'estimatedMinutes',
+        'fixedStartAt',
         'id',
         'notes',
+        'priority',
+        'schedulingMode',
         'tags',
         'text',
       ].sort(),
     );
+  });
+});
+
+describe('migrateTodos — scheduling fields', () => {
+  it('keeps a well-formed priority, estimate and mode', () => {
+    const [task] = migrateTodos(
+      [
+        {
+          id: 'abc',
+          text: 'Ship it',
+          priority: 'high',
+          estimatedMinutes: 45,
+          schedulingMode: 'fixed',
+          fixedStartAt: 5_000,
+        },
+      ],
+      NOW,
+    );
+    expect(task.priority).toBe('high');
+    expect(task.estimatedMinutes).toBe(45);
+    expect(task.schedulingMode).toBe('fixed');
+    expect(task.fixedStartAt).toBe(5_000);
+  });
+
+  it('leaves the fields absent on a legacy task rather than defaulting them', () => {
+    const [task] = migrateTodos([{ id: 'abc', text: 'Old' }], NOW);
+    expect(task.priority).toBeUndefined();
+    expect(task.estimatedMinutes).toBeUndefined();
+    expect(task.schedulingMode).toBeUndefined();
+    expect(task.fixedStartAt).toBeUndefined();
+  });
+
+  it.each(['urgent', '', 3, null, true])('drops the invalid priority %p', (priority) => {
+    const [task] = migrateTodos([{ id: 'abc', text: 'X', priority }], NOW);
+    expect(task.priority).toBeUndefined();
+  });
+
+  it.each([0, -5, 12.5, '30', null, Infinity])(
+    'drops the unusable estimate %p',
+    (estimatedMinutes) => {
+      const [task] = migrateTodos([{ id: 'abc', text: 'X', estimatedMinutes }], NOW);
+      expect(task.estimatedMinutes).toBeUndefined();
+    },
+  );
+
+  it('drops a scheduling mode outside the vocabulary', () => {
+    const [task] = migrateTodos([{ id: 'abc', text: 'X', schedulingMode: 'anchored' }], NOW);
+    expect(task.schedulingMode).toBeUndefined();
+  });
+
+  it('drops a non-finite fixed anchor', () => {
+    const [task] = migrateTodos([{ id: 'abc', text: 'X', fixedStartAt: 'soon' }], NOW);
+    expect(task.fixedStartAt).toBeUndefined();
   });
 });
 

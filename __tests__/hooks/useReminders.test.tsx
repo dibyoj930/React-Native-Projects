@@ -103,6 +103,20 @@ describe('useReminders', () => {
     expect(cancelTriggerNotification).toHaveBeenCalledWith('reminder-streak-2026-05-04');
   });
 
+  it('leaves another reconciler’s reminders alone', async () => {
+    // The approved plan's start reminders share the pending-reminder list. A
+    // daily/streak pass must not cancel them just because they are not in its
+    // own plan — that would silently break planned-start notifications.
+    getTriggerNotifications.mockResolvedValue([
+      heldReminder('plan-task-1', new Date(2026, 4, 4, 14, 0, 0).getTime()),
+    ]);
+
+    await render(tree());
+    await settle();
+
+    expect(cancelTriggerNotification).not.toHaveBeenCalledWith('reminder-plan-task-1');
+  });
+
   it('schedules nothing while permission is not granted', async () => {
     requestPermission.mockResolvedValue({ authorizationStatus: 0 });
 

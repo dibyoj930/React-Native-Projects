@@ -57,6 +57,7 @@ App.tsx
               WelcomeComponent
                 useTaskScreen()    ← tasks + timers + productivity + task reminders
                 useDailyGoals()    ← targets shared by the home tile + goals screen
+                useReplan()        ← proposal + approved plan + planned-start reminders
                 useSettings()      ← only while the Settings screen is mounted
 ```
 
@@ -64,9 +65,9 @@ Provider order is load-bearing and documented inline in `App.tsx`; do not
 reorder without reading that comment.
 
 Navigation is a single `Screen` union in `WelcomeComponent.tsx`
-(`home | tasks | tag | goals | settings`) held in `AppContent`. There is no router.
-Android hardware back is registered in `AppContent` only while a sub-screen is
-up.
+(`home | tasks | tag | goals | replan | settings`) held in `AppContent`. There is
+no router. Android hardware back is registered in `AppContent` only while a
+sub-screen is up.
 
 ## 3. Native modules and their boundaries
 
@@ -76,7 +77,7 @@ app is testable without a binary.
 | Native module | Sole boundary | Notes |
 | --- | --- | --- |
 | `@notifee/react-native` | `notifications/notificationService.ts` | Scheduled triggers, permission, initial notification, foreground events |
-| `@react-native-async-storage/async-storage` | `todos/taskRepository.ts`, `productivity/storage.ts`, `theme/ThemeProvider.tsx`, `hooks/useCustomTags.ts`, `daily-goals/goalsStorage.ts` | Five independent keys (§4) |
+| `@react-native-async-storage/async-storage` | `todos/taskRepository.ts`, `productivity/storage.ts`, `theme/ThemeProvider.tsx`, `hooks/useCustomTags.ts`, `daily-goals/goalsStorage.ts`, `replan/planStorage.ts` | Six independent keys (§4) |
 | `@react-native-community/datetimepicker` | `components/AddTodoModal.tsx` | `mode="date"` and `mode="time"` |
 | `react-native-timer-picker` | `WelcomeComponent.tsx` | Focus-duration picker |
 | `react-native-gesture-handler` | `App.tsx`, `components/SwipeableTodoRow.tsx` | Gesture root + swipe actions |
@@ -100,6 +101,7 @@ one never touches another.
 | `theme/ThemeProvider.tsx` | `@theme/preference` | the appearance control |
 | `hooks/useCustomTags.ts` | `customTags` (`CUSTOM_TAGS_STORAGE_KEY`) | `addTag` |
 | `daily-goals/goalsStorage.ts` | `@daily-goals/v1` | `saveDailyGoals` |
+| `replan/planStorage.ts` | `@replan/v1` | `saveReplanDoc` / `savePlan` (one `setItem` per apply) |
 
 Every read is defensive: a missing key, non-array/non-object JSON, or a read
 failure returns empty/default state and logs, rather than throwing. A broken
@@ -122,7 +124,7 @@ app is not foregrounded.
 
 ## 4. Storage contract
 
-Five independent AsyncStorage keys. Clearing one never touches another.
+Six independent AsyncStorage keys. Clearing one never touches another.
 
 | Key | Owner | Shape | Repair on load |
 | --- | --- | --- | --- |
@@ -131,6 +133,7 @@ Five independent AsyncStorage keys. Clearing one never touches another.
 | `@theme/preference` | `theme/ThemeProvider.tsx` | `'system' \| 'light' \| 'dark'` | falls back to `system` |
 | `customTags` (`CUSTOM_TAGS_STORAGE_KEY`) | `hooks/useCustomTags.ts` | `string[]` | normalised, deduplicated, stripped |
 | `@daily-goals/v1` | `daily-goals/goalsStorage.ts` | `{ focusMinutes, tasksCompleted }` | field-by-field via `sanitizeGoals` |
+| `@replan/v1` | `replan/planStorage.ts` | `{ version, preferences, plan }` | `sanitizeReplanDoc` |
 
 ### `todos`
 
@@ -147,14 +150,21 @@ A JSON array of `Todo`, written whole on every change (after hydration).
 | `notes` | string | left undefined (absent ≠ cleared) |
 | `dueDate` | `isValidDayKey` (`YYYY-MM-DD`) | field dropped |
 | `dueTime` | `isValidTimeKey` (`HH:mm`) | field dropped |
+| `priority` | `high \| medium \| low` | field dropped (absent reads as `low`) |
+| `estimatedMinutes` | positive whole number | field dropped |
+| `schedulingMode` | `fixed \| flexible` | field dropped |
+| `fixedStartAt` | finite number (epoch ms) | field dropped |
 
 A malformed field costs the field, never the whole task. Legacy/unknown fields
-are ignored.
+are ignored. `priority` is deliberately left absent for legacy tasks rather than
+backfilled: absent and `low` schedule identically, so writing one in would be a
+silent data change.
 
 **Export is a separate, frozen shape.** `buildExportPayload` deliberately omits
-`notes`, `dueDate`, and `dueTime`; the share body must stay backward-compatible.
-`__tests__/todos/taskRepository.test.ts` asserts the exact keys so an accidental
-addition fails.
+`notes`, `dueDate`, `dueTime`, and the scheduling fields (`priority`,
+`estimatedMinutes`, `schedulingMode`, `fixedStartAt`); the share body must stay
+backward-compatible. `__tests__/todos/taskRepository.test.ts` asserts the exact
+keys so an accidental addition fails.
 
 ### `@productivity/v1`
 
@@ -169,6 +179,17 @@ Clear focus history does not touch it). Writes are debounced
 
 One of `'system' | 'light' | 'dark'`. Missing or invalid falls back to `system`.
 
+### `@replan/v1`
+
+`{ version: 1, preferences, plan }` — one document, so an Apply is a single
+`setItem` and can never half-succeed across keys. `sanitizeReplanDoc` repairs
+field-by-field on load: a bad preferences block loses its bad fields (via
+`sanitizeReplanPreferences`), a malformed plan becomes `null`, and an unknown
+`version` rebuilds the empty doc. `plan` holds the user-approved `DayPlan`
+(`{ dayKey, approvedAt, signature, placements }`) and never any task data: the
+engine returns a *proposal* and only an explicit Apply persists one. Preferences
+travel with the plan so the two cannot disagree about how the day was built.
+
 ## 5. Notifications contract
 
 All scheduling goes through `notifications/notificationService.ts` (the only
@@ -181,12 +202,22 @@ relevant change.
 | --- | --- | --- | --- | --- |
 | Focus timer | `timer-<taskId>` | `todoId` | `getPendingTimers` | `useTimerOrchestration` |
 | Daily / streak reminder | `reminder-<planId>` | `reminder` | `getPendingReminders` | `useReminders` |
+| Planned task start | `reminder-plan-<taskId>` | `reminder` | `getPendingReminders` | `usePlanReminders` |
 | Task reminder | `task-reminder-<taskId>` | `taskReminder` | `getPendingTaskReminders` | `useTaskReminders` |
 
 Plan ids: `daily-YYYY-MM-DD` (09:00 local, 7-day window) and
 `streak-YYYY-MM-DD` (20:00 local when `streak >= 1 && !todayComplete`), from the
-pure `planReminders`. Task reminders come from the pure `planTaskReminders`:
-one entry per open task that has both a `dueDate` and a `dueTime` in the future.
+pure `planReminders`. Planned starts carry `plan-<taskId>` under the same
+`reminder` data key but a distinct body (`Planned: …`), from the pure
+`planStartReminders`; they are off unless the user opts in. Task reminders come
+from the pure `planTaskReminders`: one entry per open task that has both a
+`dueDate` and a `dueTime` in the future.
+
+Because the daily/streak and planned-start reminders share the `reminder` data
+key, **each reconciler filters the pending set to its own id namespace before
+cancelling** (`isDailyOrStreakReminderId` on the daily/streak side, a `plan-`
+prefix on the replan side). Without that guard a daily pass would delete the
+plan's start reminders as "unwanted".
 
 Reconciliation is idempotent: cancel anything no longer wanted or whose `fireAt`
 moved, then schedule what is desired but not held. The OS pending set is the
@@ -218,6 +249,11 @@ AddTodoModal.onSubmit(draft)
 The modal prefills `dueDate`/`dueTime` on edit; picking a time with no date
 defaults the date to today; "Remove due date" clears both. Removing a
 `dueDate`/`dueTime` from a task also cancels its reminder, via reconciliation.
+
+The sheet also collects two optional **scheduling** fields — `priority` and
+`estimatedMinutes` — that feed the daily replan and nothing else. Both default to
+"None": an unsized task is reported by the planner as needing an estimate rather
+than guessed at, and a task with no priority is planned as `low`.
 
 ### 6.2 Complete a task
 
@@ -253,13 +289,15 @@ cannot desynchronise it. A "running" timer is simply one with a live end time.
 ### 6.4 Reminder reconciliation
 
 ```
-App level: useReminders        planReminders     vs getPendingReminders
-Task list: useTaskReminders    planTaskReminders vs getPendingTaskReminders
+App level: useReminders        planReminders       vs getPendingReminders
+Task list: usePlanReminders    planStartReminders  vs getPendingReminders
+Task list: useTaskReminders    planTaskReminders   vs getPendingTaskReminders
 ```
 
-Both reconcilers follow the same shape: build the desired plan (pure), read what
-the OS holds, cancel anything unwanted or moved, schedule anything missing.
-`useTaskReminders` is gated on `hydrated`, so an empty first render cannot cancel
+All three reconcilers follow the same shape: build the desired plan (pure), read
+what the OS holds, cancel anything unwanted or moved, schedule anything missing,
+and only ever cancel ids in their own namespace. `useTaskReminders` and
+`usePlanReminders` are gated on `hydrated`, so an empty first render cannot cancel
 reminders that outlived the previous session.
 
 ### 6.5 Notification tap → navigation
@@ -302,6 +340,32 @@ Goals live under their own AsyncStorage key (`@daily-goals/v1`,
 `@productivity/v1` — task completion and focus sessions are read-only inputs to
 the tile's progress math, never rewritten.
 
+### 6.9 Daily replan
+
+```
+Home "Replan my day" → onNavigate({ name: 'replan' })
+  → ReplanScreen (preferences + proposal + summary)
+      Build → useReplan.generate()
+          normalizeReplanTasks(todos, timerWindows, now, day)   [replan/normalize.ts]
+          collectCommitments(fixed tasks)                       [replan/normalize.ts]
+          buildReplanProposal(input)                            [replan/engine.ts, pure]
+              → ReplanProposal (declares outcomes; mutates nothing)
+      Apply → useReplan.apply()
+          re-check signature (state unchanged) + workday end
+          savePlan(preferences, plan)   ONE setItem @replan/v1
+          → usePlanReminders reconciles plan-<taskId> reminders
+      Cancel → drop the in-memory proposal (nothing was persisted)
+```
+
+The engine works in half-open intervals `[start, end)`, never schedules before
+`now`, and subtracts commitments and running focus timers from the workday. It
+**never mutates a task** and never rewrites `dueDate`/`dueTime`; completed, fixed
+and active-timer tasks are reported `protected` and left untouched. A task with
+no estimate is reported `needsInformation` and can be sized through the existing
+sheet (`ReplanScreen.onEditTask → useTaskScreen.openEdit`). The home entry is
+hidden while a focus timer runs, since the scheduler protects a session in flight
+and rebuilding mid-session would move the ground under the user.
+
 ## 7. Testing integration
 
 Jest config (`jest.config.js`) extends `@react-native/jest-preset` and adds:
@@ -327,7 +391,8 @@ Layer → suite mapping:
 | Layer | Suites |
 | --- | --- |
 | Pure productivity | `__tests__/productivity/*` |
-| Pure tasks | `__tests__/todos/{taskRules,taskSelectors,timeKey,taskReminders,migration,taskRepository}` |
+| Pure tasks | `__tests__/todos/{taskRules,taskSelectors,timeKey,taskReminders,migration,taskRepository,taskOperations}` |
+| Pure replan | `__tests__/replan/*` (engine, interval, rank, preferences, explain, normalize, validate, planReminders, planStorage) |
 | Notifee boundary | `__tests__/notifications/{notificationService,reminderPlan}` |
 | Controllers | `__tests__/hooks/*` (probe components call the hook) |
 | Components | `__tests__/components/*` |

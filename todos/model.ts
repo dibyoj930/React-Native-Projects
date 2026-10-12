@@ -65,6 +65,36 @@ export type Todo = {
    * date-only task distinguishable from one that reminds at an hour.
    */
   dueTime?: TimeKey;
+  /**
+   * Scheduling priority for the daily replan, `'high' | 'medium' | 'low'`.
+   *
+   * Optional, and absent is not a value: the replan engine reads an absent
+   * priority as `'low'` because that is the only honest reading of "the user did
+   * not say". It is stored absent rather than written as `'low'` so a legacy task
+   * is distinguishable from one the user explicitly marked low.
+   */
+  priority?: 'high' | 'medium' | 'low';
+  /**
+   * How long the task is expected to take, in whole minutes.
+   *
+   * Optional, and absent means the replan engine cannot place the task: it
+   * classifies it `needsInformation` rather than guessing a length that would
+   * silently change the shape of the day.
+   */
+  estimatedMinutes?: number;
+  /**
+   * Whether the replan engine may move this task, or must leave it anchored.
+   *
+   * Absent reads as `'flexible'`. A `'fixed'` task is protected at its
+   * `fixedStartAt`; the engine treats its window as immovable, like a commitment.
+   */
+  schedulingMode?: 'flexible' | 'fixed';
+  /**
+   * Epoch ms a `'fixed'` task is anchored at. Meaningless on a flexible task, and
+   * never derived from `dueDate`/`dueTime` — a deadline and a start are different
+   * facts, and conflating them would make a deadline look movable.
+   */
+  fixedStartAt?: number;
 };
 
 /**
@@ -95,6 +125,12 @@ export type TodoDraft = {
    * means "replace it".
    */
   tag?: string;
+  /** Scheduling priority, or absent for none (the engine reads absent as low). */
+  priority?: 'high' | 'medium' | 'low';
+  /** Estimated length in whole minutes, or absent for "not estimated yet". */
+  estimatedMinutes?: number;
+  /** Whether the engine may move the task. Absent clears back to flexible. */
+  schedulingMode?: 'flexible' | 'fixed';
 };
 
 /**
@@ -144,8 +180,31 @@ export function migrateTodos(parsed: readonly unknown[], now: number): Todo[] {
       notes: typeof legacy.notes === 'string' ? legacy.notes : undefined,
       dueDate: isValidDayKey(legacy.dueDate) ? legacy.dueDate : undefined,
       dueTime: isValidTimeKey(legacy.dueTime) ? legacy.dueTime : undefined,
+      priority: isPriority(legacy.priority) ? legacy.priority : undefined,
+      estimatedMinutes: isPositiveWholeNumber(legacy.estimatedMinutes)
+        ? legacy.estimatedMinutes
+        : undefined,
+      schedulingMode:
+        legacy.schedulingMode === 'fixed' || legacy.schedulingMode === 'flexible'
+          ? legacy.schedulingMode
+          : undefined,
+      fixedStartAt: isFiniteNumber(legacy.fixedStartAt) ? legacy.fixedStartAt : undefined,
     };
   });
+}
+
+/** A stored priority, or false for anything else so the field is dropped. */
+function isPriority(value: unknown): value is 'high' | 'medium' | 'low' {
+  return value === 'high' || value === 'medium' || value === 'low';
+}
+
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+/** A usable estimate: a whole number of minutes greater than zero. */
+function isPositiveWholeNumber(value: unknown): value is number {
+  return isFiniteNumber(value) && Number.isInteger(value) && value > 0;
 }
 
 /**

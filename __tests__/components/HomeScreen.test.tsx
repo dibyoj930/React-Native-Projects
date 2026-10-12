@@ -58,6 +58,8 @@ function props(overrides: Partial<HomeScreenProps> = {}): HomeScreenProps {
     onAddTag: () => {},
     onAddTask: () => {},
     onOpenSettings: () => {},
+    onOpenReplan: () => {},
+    replanAvailable: true,
     today,
     onOpenGoals: () => {},
     history,
@@ -267,6 +269,32 @@ describe('HomeScreen — the add-tag chip', () => {
     await withRendered(screen(), async (renderer) => {
       await typeText(renderer, 'Add a tag', 'Deep Work');
       expect(textContent(renderer)).toContain('#');
+    });
+  });
+});
+
+describe('HomeScreen — the replan entry', () => {
+  it('offers a way to replan the day when no timer is running', async () => {
+    await withRendered(screen(), (renderer) => {
+      expect(labels(renderer)).toContain('Replan my day');
+      expect(visibleText(renderer)).toContain('Replan my day');
+    });
+  });
+
+  it('reports the entry as a request for the replan screen', async () => {
+    const onOpenReplan = jest.fn();
+    await withRendered(screen({ onOpenReplan }), async (renderer) => {
+      await press(renderer, 'Replan my day');
+      expect(onOpenReplan).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('omits the entry entirely while a focus timer is running', async () => {
+    // A greyed-out card with no explanation would read as a bug; the screen
+    // simply does not offer the destination mid-session.
+    await withRendered(screen({ replanAvailable: false }), (renderer) => {
+      expect(labels(renderer)).not.toContain('Replan my day');
+      expect(visibleText(renderer)).not.toContain('Replan my day');
     });
   });
 });

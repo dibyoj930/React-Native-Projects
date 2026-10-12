@@ -18,7 +18,7 @@
  * named operations, no context. One component consumes it, so a provider would
  * be a second way to reach the same state.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Share } from 'react-native';
 
 import { cancelTimerNotification, useNotifications } from '../notifications';
@@ -47,6 +47,23 @@ export type TaskScreen = {
    * render so two consumers cannot disagree about what "today" is.
    */
   today: string;
+  /**
+   * Storage has loaded.
+   *
+   * Exposed for the replan controller, which must not build a schedule from the
+   * first empty render — the same reason `useTaskReminders` takes it.
+   */
+  hydrated: boolean;
+  /**
+   * Whether a task has a *running* focus timer.
+   *
+   * The replan entry point is suppressed while one does: the scheduler protects
+   * that window, but offering a rebuild mid-session would invite moving the day
+   * the user is already part-way through.
+   */
+  anyTimerRunning: boolean;
+  /** The running timer's remaining window `[start, end)` in epoch ms, or null. */
+  timerWindowFor: (taskId: string) => { start: number; end: number } | null;
   /** Notifications were asked for and refused, so a timer's alert will not land. */
   notificationsBlocked: boolean;
   /** The task the edit sheet is open for, or null in create mode. */
@@ -61,6 +78,8 @@ export type TaskScreen = {
   handleTimerCancel: () => void;
   /** Opens the create sheet. */
   openCreate: () => void;
+  /** Opens the edit sheet for one task, so a `needsInformation` task can be given a length. */
+  openEdit: (id: string) => void;
   /** Closes the add/edit sheet without saving. */
   closeTaskSheet: () => void;
   /** Applies the sheet's draft: creates a task, or rewrites an existing one. */
@@ -180,6 +199,7 @@ export function useTaskScreen(): TaskScreen {
   const {
     hasTimer,
     isRunning,
+    remainingSecondsFor,
     clearTimer,
     pickerVisible,
     setPickerVisible,
@@ -198,6 +218,31 @@ export function useTaskScreen(): TaskScreen {
     // only the *status* differs, which is the argument the hook passes through.
     onStopFocus: finishFocus,
   });
+
+  /**
+   * The running timer's remaining work as a protected window `[now, now+remaining)`.
+   *
+   * The engine must not schedule over a focus session in flight. The window ends
+   * at the timer's own end time (`now + remaining`), so it stays correct as the
+   * countdown runs, and it is `null` for a paused or absent timer — which is also
+   * how a task is known to have no active timer at all.
+   */
+  const timerWindowFor = useCallback(
+    (id: string): { start: number; end: number } | null => {
+      if (!isRunning(id)) return null;
+      const remaining = remainingSecondsFor(id);
+      if (remaining <= 0) return null;
+      const start = Date.now();
+      return { start, end: start + remaining * 1000 };
+    },
+    [isRunning, remainingSecondsFor],
+  );
+
+  /** Any task mid-session; the replan entry point stands down while one is. */
+  const anyTimerRunning = useMemo(
+    () => todos.some((todo) => isRunning(todo.id)),
+    [todos, isRunning],
+  );
 
   /**
    * Deletes a task and settles everything it owed the other domains.
@@ -413,6 +458,9 @@ export function useTaskScreen(): TaskScreen {
   return {
     todos,
     today,
+    hydrated,
+    anyTimerRunning,
+    timerWindowFor,
     notificationsBlocked: permission === 'denied',
     editingTodo,
     showTaskSheet,
@@ -421,6 +469,7 @@ export function useTaskScreen(): TaskScreen {
     handleTimerConfirm,
     handleTimerCancel,
     openCreate,
+    openEdit,
     closeTaskSheet,
     submitTask,
     exportTodos,

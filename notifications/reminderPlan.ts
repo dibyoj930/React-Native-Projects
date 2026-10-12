@@ -26,6 +26,28 @@ export const STREAK_REMINDER_HOUR = 20;
 /** How many days of the rolling daily window to keep scheduled. */
 export const DAILY_REMINDER_WINDOW = 7;
 
+/** The id namespace the daily prompt lives in. */
+export const DAILY_REMINDER_ID_PREFIX = 'daily-';
+
+/** The id namespace the evening streak warning lives in. */
+export const STREAK_REMINDER_ID_PREFIX = 'streak-';
+
+/**
+ * Whether a reminder id belongs to this planner.
+ *
+ * The reconciling hooks share one pending-reminder list (they all read the same
+ * `data.reminder` key), so a reconciler that cancels "anything not in my plan"
+ * would quietly delete another's reminders. Each reconciler filters the OS's
+ * pending set through its own predicate first; this is the daily/streak side's.
+ * A planned-start reminder (`plan-<taskId>`, `replan/planReminders`) is
+ * therefore left untouched here, and vice versa.
+ */
+export function isDailyOrStreakReminderId(id: string): boolean {
+  return (
+    id.startsWith(DAILY_REMINDER_ID_PREFIX) || id.startsWith(STREAK_REMINDER_ID_PREFIX)
+  );
+}
+
 export type PlannedReminder = {
   /** Stable identity; the OS notification id is this, prefixed. */
   id: string;
@@ -64,7 +86,7 @@ export function planReminders({
     // notification would either be clamped to "now" or arrive as history.
     if (fireAt <= now) continue;
     reminders.push({
-      id: `daily-${day}`,
+      id: `${DAILY_REMINDER_ID_PREFIX}${day}`,
       fireAt,
       title: 'Plan your day',
       body: 'Pick a task and start a focus timer.',
@@ -77,7 +99,7 @@ export function planReminders({
     const fireAt = hourOnDay(today, STREAK_REMINDER_HOUR);
     if (fireAt > now) {
       reminders.push({
-        id: `streak-${today}`,
+        id: `${STREAK_REMINDER_ID_PREFIX}${today}`,
         fireAt,
         title: `Keep your ${streak}-day streak`,
         body: 'Finish today’s mission before the day is out.',

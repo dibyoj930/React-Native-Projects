@@ -77,6 +77,23 @@ export type AddTodoModalProps = {
 /** How far ahead a due date may be set. The picker bounds need an end. */
 const MAX_YEARS_AHEAD = 5;
 
+/** Priority choices offered in the sheet, beside a "None" chip. */
+const PRIORITY_OPTIONS: readonly { value: 'high' | 'medium' | 'low'; label: string }[] = [
+  { value: 'high', label: 'High' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'low', label: 'Low' },
+];
+
+/**
+ * Common task lengths, in minutes.
+ *
+ * Presets rather than a free-text number field: an estimate is a rough promise,
+ * and a chip row asks the question in one tap. `None` stays available because a
+ * task the user has not sized is a genuine state the planner reports rather than
+ * a gap it fills with a guess.
+ */
+const ESTIMATE_OPTIONS = [15, 25, 30, 45, 60, 90] as const;
+
 type Styles = ReturnType<typeof createStyles>;
 
 /**
@@ -120,6 +137,8 @@ export function AddTodoModal({
   // `tagLabel` rather than `tag`: the chip loop below binds `tag` to each available
   // tag in turn, and a state variable of the same name would be shadowed by it.
   const [tagLabel, setTagLabel] = useState<string | null>(null);
+  const [priority, setPriority] = useState<'high' | 'medium' | 'low' | undefined>(undefined);
+  const [estimatedMinutes, setEstimatedMinutes] = useState<number | undefined>(undefined);
   /** Whether the `#`-revealed chip row is out. */
   const [tagOpen, setTagOpen] = useState(false);
   /** Whether the keyboard is covering the lower fields. */
@@ -153,6 +172,8 @@ export function AddTodoModal({
     setNotes(task?.notes ?? '');
     setDueDate(task?.dueDate);
     setDueTime(task?.dueTime);
+    setPriority(task?.priority);
+    setEstimatedMinutes(task?.estimatedMinutes);
     setShowPicker(false);
     setShowTimePicker(false);
     // Only a tag the chip row can show may prefill: a stored label that is no
@@ -194,11 +215,13 @@ export function AddTodoModal({
       notes: notes.trim().length > 0 ? notes.trim() : undefined,
       dueDate,
       dueTime,
+      priority,
+      estimatedMinutes,
       // One tag or none, whichever the `#` control ends on. `undefined` means the
       // caller keeps whatever the task already had; a label means it replaces it.
       tag: tagLabel ?? undefined,
     });
-  }, [canSubmit, dueDate, dueTime, notes, onSubmit, tagLabel, text]);
+  }, [canSubmit, dueDate, dueTime, estimatedMinutes, notes, onSubmit, priority, tagLabel, text]);
 
   /**
    * The user settled on a date.
@@ -521,6 +544,62 @@ export function AddTodoModal({
               value={timeAsDate(dueTime)}
             />
           )}
+
+          {/* Priority and estimate feed the daily replan and nothing else. They
+              are optional: a task with no priority is planned as `low`, and a
+              task with no estimate is listed as needing one rather than guessed
+              at, so leaving either at "None" is honest rather than broken. */}
+          <Field
+            hint="Optional. Higher-priority work is scheduled before lower."
+            label="Priority"
+            styles={styles}
+          >
+            <View style={styles.chipRow}>
+              <Chip
+                accessibilityLabel="Priority: None"
+                label="None"
+                onPress={() => setPriority(undefined)}
+                selected={priority == null}
+                styles={styles}
+              />
+              {PRIORITY_OPTIONS.map((option) => (
+                <Chip
+                  accessibilityLabel={`Priority: ${option.label}`}
+                  key={option.value}
+                  label={option.label}
+                  onPress={() => setPriority(option.value)}
+                  selected={priority === option.value}
+                  styles={styles}
+                />
+              ))}
+            </View>
+          </Field>
+
+          <Field
+            hint="Optional. The planner needs a length before it can find this task a slot."
+            label="Estimate"
+            styles={styles}
+          >
+            <View style={styles.chipRow}>
+              <Chip
+                accessibilityLabel="Estimate: None"
+                label="None"
+                onPress={() => setEstimatedMinutes(undefined)}
+                selected={estimatedMinutes == null}
+                styles={styles}
+              />
+              {ESTIMATE_OPTIONS.map((minutes) => (
+                <Chip
+                  accessibilityLabel={`Estimate: ${minutes}m`}
+                  key={minutes}
+                  label={`${minutes}m`}
+                  onPress={() => setEstimatedMinutes(minutes)}
+                  selected={estimatedMinutes === minutes}
+                  styles={styles}
+                />
+              ))}
+            </View>
+          </Field>
         </ScrollView>
       </KeyboardAvoidingView>
     </Modal>
@@ -558,6 +637,40 @@ function Field({
       {children}
       {hint && <Text style={styles.hint}>{hint}</Text>}
     </View>
+  );
+}
+
+/**
+ * One selectable chip, shared by the priority and estimate rows.
+ *
+ * Module-level and given `styles` explicitly for the same reason as `Field`: a
+ * component defined inside the sheet's body is a new type each render. Selection
+ * is carried by `accessibilityState` rather than a renamed label, so a screen
+ * reader announces the state instead of a control that renames itself on press.
+ */
+function Chip({
+  accessibilityLabel,
+  label,
+  onPress,
+  selected,
+  styles,
+}: {
+  accessibilityLabel: string;
+  label: string;
+  onPress: () => void;
+  selected: boolean;
+  styles: Styles;
+}) {
+  return (
+    <TouchableOpacity
+      accessibilityLabel={accessibilityLabel}
+      accessibilityRole="button"
+      accessibilityState={{ selected }}
+      onPress={onPress}
+      style={[styles.chip, selected && styles.chipSelected]}
+    >
+      <Text style={[styles.chipText, selected && styles.chipTextSelected]}>{label}</Text>
+    </TouchableOpacity>
   );
 }
 
@@ -767,6 +880,37 @@ const createStyles = (t: Theme) => {
     clearDateText: {
       fontSize: 13,
       color: c.danger,
+    },
+    /**
+     * Priority / estimate chips.
+     *
+     * A wrapped row so the longest set (six estimates plus None) still fits on
+     * narrow screens without horizontal scrolling.
+     */
+    chipRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+    },
+    chip: {
+      borderRadius: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      paddingHorizontal: 12,
+      paddingVertical: 7,
+      backgroundColor: c.surface,
+    },
+    chipSelected: {
+      backgroundColor: c.primary,
+      borderColor: c.primary,
+    },
+    chipText: {
+      fontSize: 14,
+      fontWeight: '600',
+      color: c.textMuted,
+    },
+    chipTextSelected: {
+      color: c.primaryText,
     },
   });
 };

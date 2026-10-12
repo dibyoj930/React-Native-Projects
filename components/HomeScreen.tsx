@@ -60,6 +60,18 @@ export type HomeScreenProps = {
   onAddTask: () => void;
   /** Opens the settings screen. */
   onOpenSettings: () => void;
+  /** Opens the Replan screen, where a schedule is built and approved. */
+  onOpenReplan: () => void;
+  /**
+   * Whether the replan entry is offered.
+   *
+   * False while a focus timer runs: the scheduler protects a session in flight,
+   * but inviting a rebuild mid-session would invite moving the day the user is
+   * already part-way through. The screen simply omits the entry rather than
+   * showing a disabled one, because a greyed-out card with no explanation reads
+   * as a bug.
+   */
+  replanAvailable: boolean;
   /** The Today tile's readout, prepared by the productivity controller. */
   today: TodayViewModel;
   /** Opens the Goals & Preferences screen. */
@@ -79,6 +91,8 @@ export function HomeScreen({
   onAddTag,
   onAddTask,
   onOpenSettings,
+  onOpenReplan,
+  replanAvailable,
   today,
   onOpenGoals,
   history,
@@ -195,6 +209,37 @@ export function HomeScreen({
             />
           </TouchableOpacity>
         </View>
+
+        {/* The way to a plan for the day. Distinct from the task list beside it:
+            the list is everything written down, this is what to do with today.
+            Omitted while a focus timer runs — see `replanAvailable`. */}
+        {replanAvailable && (
+          <TouchableOpacity
+            accessibilityLabel="Replan my day"
+            accessibilityRole="button"
+            onPress={onOpenReplan}
+            style={styles.replanTile}
+          >
+            <View style={styles.replanIcon}>
+              <MaterialCommunityIcons
+                color={t.colors.primary}
+                name="calendar-clock"
+                size={20}
+              />
+            </View>
+            <View style={styles.replanTextGroup}>
+              <Text style={styles.replanTitle}>Replan my day</Text>
+              <Text style={styles.replanBody}>
+                Fit your tasks around the time you already have.
+              </Text>
+            </View>
+            <MaterialCommunityIcons
+              color={t.colors.textMuted}
+              name="chevron-right"
+              size={20}
+            />
+          </TouchableOpacity>
+        )}
 
         {/* Replaced a "3 of 7 tasks done" row, which counted every task ever
             added — including ones completed weeks ago — and so answered a
@@ -419,6 +464,45 @@ const createStyles = (t: Theme) => {
       color: c.text,
     },
     allTasksBody: {
+      fontSize: 13,
+      color: c.textMuted,
+    },
+    /**
+     * The Replan entry.
+     *
+     * A full-width row rather than a tile beside the `+`: it is a destination of
+     * its own, and pairing it with the tasks tile would make two adjacent panels
+     * competing to be "where you start".
+     */
+    replanTile: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      paddingVertical: 12,
+      paddingHorizontal: 12,
+      borderRadius: 10,
+      backgroundColor: c.surface,
+      marginBottom: 12,
+    },
+    /** A tinted square so the entry reads as a distinct, deliberate action. */
+    replanIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: 9,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: tintOf(c.primary),
+    },
+    replanTextGroup: {
+      flex: 1,
+      gap: 2,
+    },
+    replanTitle: {
+      fontSize: 16,
+      fontWeight: '600',
+      color: c.text,
+    },
+    replanBody: {
       fontSize: 13,
       color: c.textMuted,
     },

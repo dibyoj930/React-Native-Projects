@@ -38,6 +38,14 @@ export function applyDraftToTodo(todo: Todo, draft: TodoDraft): Todo {
     dueTime: draft.dueTime,
     // Preserve existing tag unless draft carries one; keeps legacy unknown tags.
     tags: draft.tag ? [draft.tag] : todo.tags,
+    // Scheduling fields are form data, so the draft is authoritative: a draft
+    // with no priority clears the task's own, exactly as an empty date does. The
+    // anchored start is kept only while the task stays fixed, so flipping back to
+    // flexible cannot leave a stale anchor behind.
+    priority: draft.priority,
+    estimatedMinutes: draft.estimatedMinutes,
+    schedulingMode: draft.schedulingMode,
+    fixedStartAt: draft.schedulingMode === 'fixed' ? todo.fixedStartAt : undefined,
   };
 }
 
@@ -63,5 +71,8 @@ export function createTodoFromDraft(draft: TodoDraft, id: string, ctx: TaskConte
     notes: draft.notes,
     dueDate: draft.dueDate,
     dueTime: draft.dueTime,
+    priority: draft.priority,
+    estimatedMinutes: draft.estimatedMinutes,
+    schedulingMode: draft.schedulingMode,
   };
 }

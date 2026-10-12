@@ -51,6 +51,16 @@ export type TodoRowProps = {
    */
   dueLabel?: string;
   /**
+   * The approved replan window, e.g. `2:00 PM – 2:45 PM`. Absent when the task
+   * has no approved plan for today.
+   *
+   * Passed in already formatted, like `dueLabel`, and deliberately distinct from
+   * it: a due date is a deadline the user set, a planned window is a suggestion
+   * the engine proposed and the user approved. Showing them the same way would
+   * hide which is which.
+   */
+  plannedLabel?: string;
+  /**
    * Whether that date is in the past. Only read when `dueLabel` is present.
    *
    * Passed in for the same reason as `dueLabel`: answering it needs today's day
