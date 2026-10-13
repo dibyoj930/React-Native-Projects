@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { TimerPickerModal } from 'react-native-timer-picker';
 
@@ -10,6 +10,9 @@ import { ReplanScreen } from './components/ReplanScreen';
 import { SettingsScreen } from './components/SettingsScreen';
 import { TodoRow } from './components/TodoRow';
 import { useDailyGoals, useProductivityView, useReplan, useSettings, useTaskScreen } from './hooks';
+import { useReplanSuggestions } from './hooks';
+import { usePlanOutcome } from './hooks';
+import { useReflection } from './hooks';
 import type { TimerState } from './hooks';
 import type { Todo } from './todos/model';
 import { useTheme } from './theme/useTheme';
@@ -129,6 +132,74 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
   // windows that `useTaskScreen` holds, and because the approved plan is read by
   // the rows below. It reconciles its own planned-start reminders.
   const replan = useReplan({ todos, hydrated, today, timerWindowFor });
+
+  // Today's plan vs actual. Reads the approved plan and the per-task focus
+  // attribution from the productivity snapshot, so the comparison is one
+  // derivation rather than a second copy of the same facts.
+  const outcome = usePlanOutcome({
+    hydrated,
+    dayKey: today,
+    plan: replan.plan,
+    todos,
+    attribution: productivity.attribution,
+  });
+
+  // Contextual suggestions: the plan slipped, or progress fell behind. The
+  // controller never emits while a focus timer runs, so it cannot interrupt one.
+  const suggestions = useReplanSuggestions({
+    hydrated,
+    plan: replan.plan,
+    replanTasks: replan.replanTasks,
+    todos,
+    anyTimerRunning,
+    today,
+    workdayStart: replan.preferences.workdayStart,
+    workdayEnd: replan.preferences.workdayEnd,
+    completedPlannedCount: outcome.outcome.summary.completed,
+    totalPlannedCount: outcome.outcome.summary.totalPlanned,
+  });
+
+  // The end-of-day reflection prompt. Optional and user-dismissible; it never
+  // shows while a timer runs and never touches the plan on its own.
+  const reflection = useReflection({
+    hydrated,
+    dayKey: today,
+    workdayEnd: replan.preferences.workdayEnd,
+    anyTimerRunning,
+    hasPlanToday: replan.hasPlan,
+    taskCount: todos.length,
+  });
+
+  const [reflectionModalOpen, setReflectionModalOpen] = useState(false);
+  const [yesterdayOutcome, setYesterdayOutcome] = useState<
+    Awaited<ReturnType<typeof outcome.loadYesterday>>
+  >(null);
+
+  useEffect(() => {
+    if (!hydrated) return;
+    let cancelled = false;
+    outcome.loadYesterday().then((loaded) => {
+      if (!cancelled) setYesterdayOutcome(loaded);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // `outcome.loadYesterday` is stable across renders.
+  }, [hydrated, outcome.loadYesterday]);
+
+  // Persist today's comparison as it evolves, so tomorrow can show "Yesterday".
+  // The signature is the comparison's *counts*, not its focus minutes: focus
+  // ticks every second during a session, and a storage write per second would be
+  // absurd. The final focus figure is captured on reflection submit (below).
+  const savedOutcomeRef = useRef<string>('');
+  useEffect(() => {
+    if (!hydrated || !replan.hasPlan) return;
+    const s = outcome.outcome.summary;
+    const signature = `${today}:${s.totalPlanned}:${s.completed}:${s.completedOnTime}:${s.completedLate}:${s.missed}`;
+    if (savedOutcomeRef.current === signature) return;
+    savedOutcomeRef.current = signature;
+    outcome.saveOutcome().catch(() => {});
+  }, [hydrated, replan.hasPlan, outcome, today]);
 
   // The one renderer both lists share. It is a one-liner here rather than in the
   // controller because it is JSX: the controller answers "what are this row's
@@ -290,6 +361,23 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
         onOpenTasks={() => onNavigate({ name: 'tasks' })}
         tags={tags}
         todos={todos}
+        suggestions={suggestions.suggestions}
+        onDismissSuggestion={suggestions.dismiss}
+        onRemindLaterSuggestion={suggestions.remindLater}
+        todayOutcome={replan.hasPlan ? outcome.outcome : undefined}
+        yesterdayOutcome={yesterdayOutcome ?? undefined}
+        showReflectionPrompt={reflection.canReflect}
+        onOpenReflection={() => setReflectionModalOpen(true)}
+        onDismissReflection={reflection.dismiss}
+        reflectionModalVisible={reflectionModalOpen}
+        onSubmitReflection={async (data) => {
+          await reflection.submit(data);
+          // End of day is the natural moment to freeze the final comparison,
+          // including the focus minutes the coarse auto-save above skips.
+          await outcome.saveOutcome().catch(() => {});
+          setReflectionModalOpen(false);
+        }}
+        onCloseReflection={() => setReflectionModalOpen(false)}
       />
       {sheets}
     </View>

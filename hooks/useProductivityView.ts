@@ -174,5 +174,10 @@ export function useProductivityView(goals: DailyGoals) {
     [snapshot.streak, snapshot.recentDays],
   );
 
-  return { today, history, todayRollup: snapshot.todayRollup };
+  return {
+    today,
+    history,
+    todayRollup: snapshot.todayRollup,
+    attribution: snapshot.attribution,
+  };
 }

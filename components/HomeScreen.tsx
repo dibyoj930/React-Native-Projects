@@ -32,6 +32,24 @@ import { accentFor, normalizeTagInput, tintOf, type TagOption } from '../todos/t
 import { openCount } from '../todos/taskSelectors';
 import { useTheme } from '../theme/useTheme';
 import type { Theme } from '../theme/theme';
+import { SuggestionBanner } from './SuggestionBanner';
+import { ReplanSuggestionSheet } from './ReplanSuggestionSheet';
+import { PlanOutcomeSummary } from './PlanOutcomeSummary';
+import { ReflectionPromptBanner } from './ReflectionPromptBanner';
+import { ReflectionModal } from './ReflectionModal';
+import { DevPreviewBar } from './DevPreviewBar';
+import type { PlanOutcome, ReplanSuggestion } from '../replan';
+import type { ReflectionEntry } from '../reflections';
+
+/**
+ * The dev-only preview panel on the home screen.
+ *
+ * Off for now. Flip to `true` (in a dev build) to bring back the
+ * "Preview suggestion / reflection" buttons; `__DEV__` keeps it out of release
+ * builds even if this is left on.
+ */
+const SHOW_DEV_PREVIEW = false;
+
 
 export type HomeScreenProps = {
   /** The whole list — the tile counts it, the export button is enabled by it. */
@@ -80,6 +98,20 @@ export type HomeScreenProps = {
   history: HistoryViewModel;
   /** Shares the list as JSON. No-op when there is nothing to export. */
   onExport: () => void;
+  /** Contextual suggestions for today, rendered as a banner above the plan tile. */
+  suggestions?: ReplanSuggestion[];
+  onDismissSuggestion?: (id: string) => void;
+  onRemindLaterSuggestion?: (id: string) => void;
+  /** Plan-vs-actual comparison for today and yesterday, when available. */
+  todayOutcome?: PlanOutcome;
+  yesterdayOutcome?: PlanOutcome;
+  /** The end-of-day reflection prompt and the modal it opens. */
+  showReflectionPrompt?: boolean;
+  onOpenReflection?: () => void;
+  onDismissReflection?: () => void;
+  reflectionModalVisible?: boolean;
+  onSubmitReflection?: (entry: Partial<ReflectionEntry>) => Promise<void> | void;
+  onCloseReflection?: () => void;
 };
 
 export function HomeScreen({
@@ -97,6 +129,17 @@ export function HomeScreen({
   onOpenGoals,
   history,
   onExport,
+  suggestions = [],
+  onDismissSuggestion,
+  onRemindLaterSuggestion,
+  yesterdayOutcome,
+  todayOutcome,
+  showReflectionPrompt,
+  onOpenReflection,
+  onDismissReflection,
+  reflectionModalVisible,
+  onSubmitReflection,
+  onCloseReflection,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
   const t = useTheme();
@@ -105,6 +148,8 @@ export function HomeScreen({
   // Whether the add-tag field holds the keyboard. It is invisible at rest, so
   // this is what decides when it appears as a chip.
   const [tagFocused, setTagFocused] = useState(false);
+  const [sheetVisible, setSheetVisible] = useState(false);
+  const [activeSuggestion, setActiveSuggestion] = React.useState<any>(null);
 
   /**
    * Commits whatever is in the field.
@@ -154,6 +199,7 @@ export function HomeScreen({
               name="cog-outline"
               size={24}
             />
+
           </TouchableOpacity>
         </View>
 
@@ -194,6 +240,7 @@ export function HomeScreen({
               name="chevron-right"
               size={20}
             />
+
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -207,9 +254,28 @@ export function HomeScreen({
               name="plus"
               size={24}
             />
+
           </TouchableOpacity>
         </View>
 
+        {suggestions.length > 0 && replanAvailable && (
+          <SuggestionBanner
+            suggestion={suggestions[0]}
+            onAction={() => {
+              setActiveSuggestion(suggestions[0]);
+              setSheetVisible(true);
+            }}
+            onDismiss={() => onDismissSuggestion?.(suggestions[0].id)}
+            onRemindLater={() => onRemindLaterSuggestion?.(suggestions[0].id)}
+          />
+
+        )}
+        {__DEV__ && SHOW_DEV_PREVIEW && <DevPreviewBar />}
+        {todayOutcome && <PlanOutcomeSummary outcome={todayOutcome} title="Today: plan vs actual" />}
+        {yesterdayOutcome && <PlanOutcomeSummary outcome={yesterdayOutcome} title="Yesterday: plan vs actual" />}
+        {showReflectionPrompt && (
+          <ReflectionPromptBanner onOpen={() => onOpenReflection?.()} onDismiss={() => onDismissReflection?.()} />
+        )}
         {/* The way to a plan for the day. Distinct from the task list beside it:
             the list is everything written down, this is what to do with today.
             Omitted while a focus timer runs — see `replanAvailable`. */}
@@ -226,6 +292,7 @@ export function HomeScreen({
                 name="calendar-clock"
                 size={20}
               />
+
             </View>
             <View style={styles.replanTextGroup}>
               <Text style={styles.replanTitle}>Replan my day</Text>
@@ -238,6 +305,7 @@ export function HomeScreen({
               name="chevron-right"
               size={20}
             />
+
           </TouchableOpacity>
         )}
 
@@ -308,6 +376,7 @@ export function HomeScreen({
                 style={styles.addTagInput}
                 value={draftTag}
               />
+
             </View>
           </View>
         </View>
@@ -346,6 +415,7 @@ export function HomeScreen({
             size={18}
             color={todos.length === 0 ? t.colors.textDisabled : t.colors.primaryText}
           />
+
           <Text
             style={[
               styles.exportButtonText,
@@ -357,7 +427,29 @@ export function HomeScreen({
           </Text>
         </TouchableOpacity>
       </View>
-    </>
+          <ReplanSuggestionSheet
+        visible={sheetVisible}
+        suggestion={activeSuggestion}
+        onClose={() => setSheetVisible(false)}
+        onActionPrimary={(s) => {
+          setSheetVisible(false);
+          onOpenReplan();
+        }}
+        onDismiss={(s) => {
+          onDismissSuggestion?.(s.id);
+          setSheetVisible(false);
+        }}
+        onRemindLater={(s) => {
+          onRemindLaterSuggestion?.(s.id);
+          setSheetVisible(false);
+        }}
+      />
+      <ReflectionModal
+        visible={!!reflectionModalVisible}
+        onClose={() => onCloseReflection?.()}
+        onSubmit={async (d) => { await onSubmitReflection?.(d); }}
+      />
+</>
   );
 }
 

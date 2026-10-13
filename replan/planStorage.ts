@@ -27,6 +27,7 @@ export function emptyReplanDoc(): ReplanDoc {
     version: 1,
     preferences: { ...DEFAULT_REPLAN_PREFERENCES },
     plan: null,
+    suggestions: undefined,
   };
 }
 
@@ -75,10 +76,22 @@ function sanitizeDayPlan(value: unknown): DayPlan | null {
 export function sanitizeReplanDoc(value: unknown): ReplanDoc {
   const raw = (value ?? {}) as Partial<ReplanDoc>;
   if (raw.version !== 1) return emptyReplanDoc();
+  const plan = sanitizeDayPlan(raw.plan);
+  const suggestions = raw.suggestions as any;
+  let cleanedSuggestions = undefined;
+  if (suggestions && typeof suggestions === 'object') {
+    cleanedSuggestions = {
+      dayKey: typeof suggestions.dayKey === 'string' ? suggestions.dayKey : plan?.dayKey ?? '',
+      dismissedIds: Array.isArray(suggestions.dismissedIds) ? suggestions.dismissedIds.filter((x: any) => typeof x === 'string') : [],
+      snoozedUntil: typeof suggestions.snoozedUntil === 'object' && suggestions.snoozedUntil ? suggestions.snoozedUntil : undefined,
+      lastEvaluatedAt: typeof suggestions.lastEvaluatedAt === 'number' ? suggestions.lastEvaluatedAt : Date.now(),
+    };
+  }
   return {
     version: 1,
     preferences: sanitizeReplanPreferences(raw.preferences),
-    plan: sanitizeDayPlan(raw.plan),
+    plan,
+    suggestions: cleanedSuggestions,
   };
 }
 

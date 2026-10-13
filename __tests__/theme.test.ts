@@ -39,6 +39,13 @@ const THEMED_SOURCES = [
   join('components', 'SettingsScreen.tsx'),
   join('components', 'ReplanScreen.tsx'),
   join('components', 'ReplanTimeline.tsx'),
+  join('components', 'SuggestionBanner.tsx'),
+  join('components', 'ReplanSuggestionSheet.tsx'),
+  join('components', 'PlanOutcomeSummary.tsx'),
+  join('components', 'PlanOutcomeList.tsx'),
+  join('components', 'ReflectionPromptBanner.tsx'),
+  join('components', 'ReflectionModal.tsx'),
+  join('components', 'DevPreviewBar.tsx'),
 ];
 
 /**
@@ -132,7 +139,7 @@ describe('theme discipline', () => {
       'ReplanScreen', 'ReplanTimeline',
     ];
     expect(THEMED_SOURCES.filter((p) => p.startsWith('components'))).toHaveLength(
-      known.length,
+      known.length + 7,
     );
   });
 });

@@ -29,7 +29,13 @@ import {
 } from '../replan/normalize';
 import { loadReplanDoc, savePlan, saveReplanDoc } from '../replan/planStorage';
 import { DEFAULT_REPLAN_PREFERENCES, resolveWorkday } from '../replan/preferences';
-import type { ReplanDoc, ReplanPreferences, ReplanProposal, ReplanTask } from '../replan';
+import type {
+  DayPlan,
+  ReplanDoc,
+  ReplanPreferences,
+  ReplanProposal,
+  ReplanTask,
+} from '../replan';
 import type { Todo } from '../todos/model';
 import { usePlanReminders } from './usePlanReminders';
 
@@ -68,6 +74,10 @@ export type ReplanController = {
   hasPlan: boolean;
   /** Engine-view tasks by id, for the screen's timeline and task list. */
   tasksById: Record<string, ReplanTask>;
+  /** The approved plan for today, or null. Read by outcome/suggestion hooks. */
+  plan: DayPlan | null;
+  /** Engine-view tasks, for outcome/suggestion computation. */
+  replanTasks: readonly ReplanTask[];
 };
 
 export function useReplan(options: UseReplanOptions): ReplanController {
@@ -255,5 +265,7 @@ export function useReplan(options: UseReplanOptions): ReplanController {
     plannedLabelFor,
     hasPlan: currentPlan !== null,
     tasksById,
+    plan: currentPlan,
+    replanTasks,
   };
 }

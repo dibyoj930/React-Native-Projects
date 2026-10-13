@@ -192,6 +192,55 @@ export type ReplanProposal = {
   validation: ValidationResult;
 };
 
+/** Plan outcome comparison types. */
+export type PlannedTaskResultStatus =
+  | 'completed-on-time'
+  | 'completed-late'
+  | 'postponed'
+  | 'missed'
+  | 'ongoing'
+  | 'infeasible';
+
+export type PlannedTaskResult = {
+  taskId: string;
+  taskText?: string;
+  plannedStart?: number;
+  plannedEnd?: number;
+  wasScheduled: boolean;
+  completed: boolean;
+  completedAt?: number;
+  actualFocusSeconds?: number;
+  status: PlannedTaskResultStatus;
+  reason?: string;
+};
+
+export type PlanOutcome = {
+  dayKey: DayKey;
+  planApprovedAt: number;
+  generatedAt: number;
+  planSignature: string;
+  results: PlannedTaskResult[];
+  summary: {
+    totalPlanned: number;
+    completed: number;
+    completedOnTime: number;
+    completedLate: number;
+    postponed: number;
+    missed: number;
+    totalPlannedFocusMins?: number;
+    totalActualFocusMins?: number;
+  };
+};
+
+
+/** State for contextual suggestions (per-day). */
+export type ReplanSuggestionsState = {
+  dayKey: DayKey;
+  dismissedIds: string[]; // permanently dismissed for today
+  snoozedUntil?: Record<string, number>; // snoozed temporarily
+  lastEvaluatedAt: number;
+};
+
 /** One task's approved window inside a persisted `DayPlan`. */
 export type DayPlanPlacement = {
   taskId: string;
@@ -218,4 +267,5 @@ export type ReplanDoc = {
   version: 1;
   preferences: ReplanPreferences;
   plan: DayPlan | null;
+  suggestions?: ReplanSuggestionsState;
 };
