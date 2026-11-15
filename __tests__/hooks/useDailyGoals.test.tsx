@@ -13,8 +13,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   DAILY_GOALS_STORAGE_KEY,
   DEFAULT_DAILY_GOALS,
-  useDailyGoals,
 } from '../../daily-goals';
+import { useDailyGoals } from '../../hooks/useDailyGoals';
 import { render } from '../support/render';
 
 type Api = ReturnType<typeof useDailyGoals>;

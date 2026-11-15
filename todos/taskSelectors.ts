@@ -8,10 +8,10 @@
  * The screen supplies the list and today's day key; it does not decide.
  *
  * Day keys are `YYYY-MM-DD`, so ordering is plain string comparison — the same
- * property `productivity/dateKey.ts` documents. No `Date` is constructed here, so
- * no timezone can shift an overdue task back onto today.
+ * property `shared/date.ts` documents. No `Date` is constructed here, so no
+ * timezone can shift an overdue task back onto today.
  */
-import type { DayKey } from '../productivity';
+import type { DayKey } from '../shared/date';
 import type { Todo } from './model';
 
 export function openCount(todos: readonly Todo[]): number {
@@ -156,4 +156,63 @@ export function groupTodos(todos: readonly Todo[], today: DayKey): TaskGroup[] {
     title: GROUP_TITLES[key],
     data: buckets[key],
   }));
+}
+
+/** The message an empty list shows: a title and a sentence of guidance. */
+export type TaskListEmptyState = {
+  title: string;
+  body: string;
+};
+
+/** The list's one-line header count and, when there is nothing to show, why. */
+export type TaskListSummary = {
+  /** The header's one-line count, e.g. `3 open of 5`. */
+  subtitle: string;
+  /** The empty-list message, or `null` when there are rows to show. */
+  emptyState: TaskListEmptyState | null;
+};
+
+/**
+ * The subtitle and empty-list copy for a filtered task list.
+ *
+ * `filtered` is what is on screen (tag filter and search both applied); `base`
+ * is the list before the search, which is what tells "this tag has no tasks"
+ * apart from "that search matched nothing". The screen supplies the lists and
+ * the active tag; it does not decide what either should say.
+ */
+export function taskListSummary(
+  filtered: readonly Todo[],
+  base: readonly Todo[],
+  filterTag: string | undefined,
+): TaskListSummary {
+  // Counted over what is shown, not the whole list: the subtitle describes the
+  // list under it.
+  const open = openCount(filtered);
+  const subtitle =
+    filtered.length === 0
+      ? 'Nothing yet'
+      : open === 0
+        ? `All ${filtered.length} done`
+        : `${open} open of ${filtered.length}`;
+
+  // Three empty states, because one message cannot be true in all three cases:
+  // the list has rows, the tag has no tasks at all, or the search matched
+  // nothing. The first is `null` — no component goes in the list.
+  let emptyState: TaskListEmptyState | null = null;
+  if (filtered.length === 0) {
+    emptyState =
+      base.length === 0
+        ? {
+            title: filterTag ? 'No Todos yet' : 'No tasks yet',
+            body: filterTag
+              ? `Tap + to add the first ${filterTag} task — it is created already tagged.`
+              : 'Anything you add shows up here, whether or not it has a date.',
+          }
+        : {
+            title: 'No matches',
+            body: 'Nothing here fits that search. Clear it to see every task again.',
+          };
+  }
+
+  return { subtitle, emptyState };
 }

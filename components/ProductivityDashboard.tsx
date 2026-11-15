@@ -1,27 +1,10 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Pressable, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-import { formatDayRange, formatDuration, formatWeekday, useProductivity } from '../productivity';
+import { FOCUS_BAR_TRACK_HEIGHT, FOCUS_BAR_WIDTH } from '../productivity';
+import type { HistoryViewModel } from '../hooks/useProductivityView';
 import { useTheme } from '../theme/useTheme';
 import type { Theme } from '../theme/theme';
-
-/**
- * Height of a bar track, in px.
- *
- * Shared between the style and the fill maths: the opened bar animates its
- * height in points, so both have to agree on how tall a full track is.
- */
-const BAR_TRACK_HEIGHT = 64;
-
-/**
- * Width of a bar, in px.
- *
- * Each bar sits in a `flex: 1` column, so a full-width track stretches to
- * whatever share of the panel that column gets — a slab per day, seven times
- * over. A fixed, centred width keeps the seven columns evenly spaced while the
- * sticks themselves stay thin.
- */
-const BAR_WIDTH = 16;
 
 /**
  * History: the streak and the day-wise focus chart.
@@ -37,26 +20,28 @@ const BAR_WIDTH = 16;
  *
  * Every figure is derived on read, never a stored counter, so this cannot drift
  * out of sync with the logs behind it.
+ *
+ * The panel is a dumb view: it renders the `model` it is handed and reports
+ * taps. The bar maths (target, fill percentages, heights), the range label, the
+ * milestone celebration sentence and the streak reduction all live in the
+ * productivity controller (`useProductivityView`), and the pure half of that is
+ * under `productivity/focusChart.ts` and `productivity/milestones.ts` — so this
+ * component keeps only the view state a chart needs: which bar is open, and
+ * which milestone banners have been patted away.
  */
-export function ProductivityDashboard() {
+export type ProductivityDashboardProps = {
+  /** Everything the panel prints, prepared above the view. */
+  model: HistoryViewModel;
+};
+
+export function ProductivityDashboard({ model }: ProductivityDashboardProps) {
   const t = useTheme();
   const styles = useMemo(() => createStyles(t), [t]);
-  const { snapshot } = useProductivity();
-  const { streak, recentDays } = snapshot;
 
-  // The day bars are sized against the window's own biggest focus day rather than
-  // an absolute "full bar" number. A twelve-hour anchor made every realistic week
-  // hug the baseline — an hour of focus read as an eighth of a bar — so bars now
-  // answer "how much of my best day is this?" and a consistent routine fills the
-  // chart instead of petering out at the bottom of it.
-  const maxFocusMinutes = useMemo(
-    () =>
-      recentDays.reduce(
-        (max, rollup) => Math.max(max, rollup.focusedSeconds / 60),
-        0,
-      ),
-    [recentDays],
-  );
+  // Milestone congratulations are dismissible, one rung at a time — patting away
+  // the 6h banner must not silence the 8h one later. View state only; the target
+  // itself is derived from history, so it needs no storage.
+  const [dismissedMilestones, setDismissedMilestones] = useState(() => new Set<number>());
 
   // Which bar is open. Null is the resting state: every day shows a pale bar
   // with no tip, and nothing is highlighted.
@@ -78,14 +63,6 @@ export function ProductivityDashboard() {
     }).start();
   }, [grow, selectedDay]);
 
-  // Names the span the bars cover. The columns carry weekday names — `Mon`,
-  // `Tue` — which read as *when* but not as which month, so a window straddling
-  // a month boundary still needs this to anchor it.
-  const rangeLabel =
-    recentDays.length > 1
-      ? formatDayRange(recentDays[0].day, recentDays[recentDays.length - 1].day)
-      : '';
-
   return (
     <View style={styles.panel}>
       <View style={styles.block}>
@@ -97,23 +74,23 @@ export function ProductivityDashboard() {
             reader compare them to work out which one was "now". */}
         <View style={styles.streakTile}>
           <View style={styles.streakHero}>
-            <Text style={styles.streakFlame}>{streak.current > 0 ? '🔥' : '🌱'}</Text>
+            <Text style={styles.streakFlame}>{model.streak.current > 0 ? '🔥' : '🌱'}</Text>
             <View style={styles.streakHeroText}>
               <Text style={styles.streakHeroValue}>
-                {streak.current} {streak.current === 1 ? 'day' : 'days'}
+                {model.streak.current} {model.streak.current === 1 ? 'day' : 'days'}
               </Text>
               <Text style={styles.streakHeroLabel}>current streak</Text>
             </View>
           </View>
 
           <View style={styles.streakFacts}>
-            <Fact value={String(streak.longest)} label="best" styles={styles} />
+            <Fact value={String(model.streak.longest)} label="best" styles={styles} />
             <View style={styles.factDivider} />
             <Fact
-              value={String(streak.freezesRemaining)}
-              label={streak.freezesRemaining === 1 ? 'freeze' : 'freezes'}
+              value={String(model.streak.freezesRemaining)}
+              label={model.streak.freezesRemaining === 1 ? 'freeze' : 'freezes'}
               styles={styles}
-              accent={streak.freezesRemaining > 0}
+              accent={model.streak.freezesRemaining > 0}
             />
           </View>
         </View>
@@ -123,66 +100,67 @@ export function ProductivityDashboard() {
 
       <View style={styles.block}>
         <Text style={styles.sectionLabel}>Recent focus</Text>
-        {recentDays.length === 0 ? (
+        {model.bars.length === 0 ? (
           <Text style={styles.hint}>
             No focus logged yet. Start a timer to begin building history.
           </Text>
         ) : (
           <>
+            {model.celebration !== null &&
+              !dismissedMilestones.has(model.celebration.reachedMinutes) && (
+                <View style={styles.celebration}>
+                  <Text style={styles.celebrationText}>{model.celebration.message}</Text>
+                  <TouchableOpacity
+                    accessibilityLabel="Got it"
+                    accessibilityRole="button"
+                    activeOpacity={0.8}
+                    onPress={() =>
+                      setDismissedMilestones((prev) => {
+                        const next = new Set(prev);
+                        next.add(model.celebration!.reachedMinutes);
+                        return next;
+                      })
+                    }
+                    style={styles.celebrationDismiss}
+                  >
+                    <Text style={styles.celebrationDismissText}>Got it</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
             <View style={styles.journeyBars}>
-              {/*
-                Reversed for render. `recentDays` is newest-first, which is the
-                right contract for a "recent" list but the wrong one for a time
-                axis: mapped in array order the bars ran today → six days ago,
-                so the dates read 06 05 04 03 02 01 28 and time appeared to
-                travel backwards. A chart's x-axis runs oldest → newest like
-                every calendar, so the direction is fixed here rather than by
-                changing the selector and its tests.
+              {/* The bars arrive oldest → newest from the model, ready to render
+                  left-to-right — the reversal that production charts need is the
+                  controller's job, not this view's.
 
-                Each column is a tap target. At rest every day shows a pale bar;
-                tapping one grows it back to solid green, wakes the orange task
-                tip above the fill, and adds the task count beside the time.
-              */}
-              {[...recentDays].reverse().map((rollup) => {
-                const isSelected = rollup.day === selectedDay;
-                const tipHeight = taskTipHeight(rollup.tasksCompleted);
-                const fillPercent = focusFillPercent(
-                  rollup.focusedSeconds,
-                  maxFocusMinutes,
-                );
-                const fillHeight = fillHeightPx(fillPercent, tipHeight);
-                const tasks = `${rollup.tasksCompleted} ${
-                  rollup.tasksCompleted === 1 ? 'task' : 'tasks'
-                }`;
-
+                  Each column is a tap target. At rest every day shows a pale bar;
+                  tapping one grows it back to solid green, wakes the orange task
+                  tip above the fill, and adds the task count beside the time. */}
+              {model.bars.map((bar) => {
+                const isSelected = bar.day === selectedDay;
                 return (
                   <Pressable
-                    key={rollup.day}
+                    key={bar.day}
                     style={styles.journeyColumn}
-                    onPress={() => setSelectedDay(isSelected ? null : rollup.day)}
+                    onPress={() => setSelectedDay(isSelected ? null : bar.day)}
                     accessibilityRole="button"
                     accessibilityState={{ selected: isSelected }}
-                    accessibilityLabel={`${formatWeekday(rollup.day)}, ${formatDuration(
-                      rollup.focusedSeconds,
-                    )}, ${tasks}`}
+                    accessibilityLabel={bar.label}
                   >
                     <View style={styles.journeyValueZone}>
                       <Text style={styles.journeyValue} numberOfLines={1}>
-                        {formatDuration(rollup.focusedSeconds)}
+                        {bar.durationLabel}
                       </Text>
                       {isSelected && (
                         <Text style={styles.journeyTask} numberOfLines={1}>
-                          {tasks}
+                          {bar.tasksLabel}
                         </Text>
                       )}
                     </View>
                     <View style={styles.journeyBarTrack}>
                       {isSelected ? (
                         <>
-                          {tipHeight > 0 && (
-                            <View
-                              style={[styles.journeyTip, { height: tipHeight }]}
-                            />
+                          {bar.tipHeight > 0 && (
+                            <View style={[styles.journeyTip, { height: bar.tipHeight }]} />
                           )}
                           <Animated.View
                             style={[
@@ -190,7 +168,7 @@ export function ProductivityDashboard() {
                               {
                                 height: grow.interpolate({
                                   inputRange: [0, 1],
-                                  outputRange: [0, fillHeight],
+                                  outputRange: [0, bar.fillHeight],
                                 }),
                                 backgroundColor: grow.interpolate({
                                   inputRange: [0, 1],
@@ -208,20 +186,20 @@ export function ProductivityDashboard() {
                           style={[
                             styles.journeyBarFill,
                             {
-                              height: `${fillPercent}%`,
+                              height: `${bar.fillPercent}%`,
                               backgroundColor: t.colors.focusBarIdle,
                             },
                           ]}
                         />
                       )}
                     </View>
-                    <Text style={styles.journeyLabel}>{formatWeekday(rollup.day)}</Text>
+                    <Text style={styles.journeyLabel}>{bar.weekdayLabel}</Text>
                   </Pressable>
                 );
               })}
             </View>
             <Text style={styles.hint}>
-              {rangeLabel} · green fill is focus time, sized to your biggest focus day
+              {model.rangeLabel} · green fill is focus time, a full bar is the next focus milestone
             </Text>
           </>
         )}
@@ -254,44 +232,6 @@ function Fact({
       <Text style={styles.factLabel}>{label}</Text>
     </View>
   );
-}
-
-/**
- * Focus fill as a percentage of the window's tallest bar.
- *
- * The track is a fixed height and only the fill moves, so a day reads as "how
- * much of my biggest focus day is this" rather than "how big is this bar".
- * Sizing to the window's own maximum rather than an absolute number keeps the
- * chart honest about a quiet week: bars compare a day against the user's actual
- * routine, which is the question "have I been consistent?" is really asking.
- */
-function focusFillPercent(focusedSeconds: number, maxFocusMinutes: number): number {
-  const minutes = focusedSeconds / 60;
-  if (!(minutes > 0) || !(maxFocusMinutes > 0)) return 0;
-  return Math.min(100, (minutes / maxFocusMinutes) * 100);
-}
-
-/**
- * Fill height, in px, for the opened bar.
- *
- * The orange task tip sits above the green fill inside the same fixed track, so
- * a full day's green stops short to leave the cap room to sit.
- */
-function fillHeightPx(percent: number, tipHeight: number): number {
-  const ratio = percent / 100;
-  const room = BAR_TRACK_HEIGHT - tipHeight;
-  return Math.max(0, Math.min(room, ratio * BAR_TRACK_HEIGHT));
-}
-
-/**
- * Orange tip height, in px, from the tasks closed that day.
- *
- * None at zero; otherwise ~3px per task, capped so a very productive day cannot
- * overflow the track it sits in.
- */
-function taskTipHeight(tasksCompleted: number): number {
-  if (!(tasksCompleted > 0)) return 0;
-  return Math.min(12, tasksCompleted * 3);
 }
 
 const createStyles = (t: Theme) =>
@@ -427,8 +367,8 @@ const createStyles = (t: Theme) =>
       fontVariant: ['tabular-nums'],
     },
     journeyBarTrack: {
-      width: BAR_WIDTH,
-      height: BAR_TRACK_HEIGHT,
+      width: FOCUS_BAR_WIDTH,
+      height: FOCUS_BAR_TRACK_HEIGHT,
       justifyContent: 'flex-end',
       borderRadius: 4,
       overflow: 'hidden',
@@ -447,6 +387,40 @@ const createStyles = (t: Theme) =>
     journeyLabel: {
       color: t.colors.textMuted,
       fontSize: 11,
+    },
+
+    /**
+     * The milestone celebration.
+     *
+     * `surfaceMuted` like the streak tile, so the banner lifts off the panel
+     * without a border; the dismissal reads as a quiet button beside the
+     * message rather than a second utterance.
+     */
+    celebration: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      backgroundColor: t.colors.surfaceMuted,
+      borderRadius: 12,
+      paddingVertical: 10,
+      paddingHorizontal: 12,
+    },
+    celebrationText: {
+      flex: 1,
+      color: t.colors.text,
+      fontSize: 12,
+      lineHeight: 16,
+    },
+    celebrationDismiss: {
+      borderRadius: 8,
+      paddingVertical: 6,
+      paddingHorizontal: 10,
+      backgroundColor: t.colors.primary,
+    },
+    celebrationDismissText: {
+      color: t.colors.primaryText,
+      fontSize: 12,
+      fontWeight: '600',
     },
 
     hint: {

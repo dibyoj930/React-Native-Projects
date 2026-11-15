@@ -102,8 +102,84 @@ describe('useTaskScreen — completion guards', () => {
   });
 });
 
-describe('useTaskScreen — deletion', () => {
+describe('useTaskScreen — focus attribution', () => {
   beforeEach(async () => {
+    await render(controllerTree());
+    await settle();
+  });
+
+  it('copies the task career link onto the finished focus session', async () => {
+    const career = { goalId: 'goal-1', skillIds: ['skill-1'] };
+
+    await act(() => api!.openCreate());
+    await act(() => api!.submitTask({ text: 'Write the case study', career }));
+    const todo = api!.todos[0];
+
+    await act(() => api!.rowPropsFor(todo).onStartFocus());
+    await act(() => api!.handleTimerConfirm({ minutes: 25 }));
+    await act(() => api!.rowPropsFor(todo).onStopTimer());
+
+    expect(api!.focusSessions).toHaveLength(1);
+    expect(api!.focusSessions[0].career).toEqual(career);
+  });
+
+  it('keeps the snapshot even if the task is edited while focus is running', async () => {
+    const original = { goalId: 'goal-1' };
+    const replacement = { goalId: 'goal-2' };
+
+    await act(() => api!.openCreate());
+    await act(() => api!.submitTask({ text: 'Draft the proposal', career: original }));
+    const todo = api!.todos[0];
+
+    await act(() => api!.rowPropsFor(todo).onStartFocus());
+    await act(() => api!.handleTimerConfirm({ minutes: 25 }));
+
+    await act(() => api!.openEdit(todo.id));
+    await act(() => api!.submitTask({ text: 'Draft the proposal', career: replacement }));
+    await act(() => api!.rowPropsFor(api!.todos[0]).onStopTimer());
+
+    // The task now points at the new goal, but the time already focused still
+    // belongs to the work it was started for.
+    expect(api!.todos[0].career).toEqual(replacement);
+    expect(api!.focusSessions[0].career).toEqual(original);
+  });
+});
+
+describe('useTaskScreen — draft prefill', () => {
+  beforeEach(async () => {
+    await render(controllerTree());
+    await settle();
+  });
+
+  it('exposes a supplied create draft and clears it on close', async () => {
+    const draft = {
+      text: 'Career: practise facilitation',
+      estimatedMinutes: 25,
+      career: { goalId: 'goal-1', skillIds: ['skill-1'] },
+    };
+
+    await act(() => api!.openCreate(draft));
+    expect(api!.showTaskSheet).toBe(true);
+    expect(api!.editingTodo).toBeNull();
+    expect(api!.draftPrefill).toEqual(draft);
+
+    await act(() => api!.closeTaskSheet());
+    expect(api!.showTaskSheet).toBe(false);
+    expect(api!.draftPrefill).toBeNull();
+  });
+
+  it('drops the prefill when the user opens an existing task instead', async () => {
+    await act(() => api!.openCreate({ text: 'Career: a suggestion' }));
+    await act(() => api!.submitTask({ text: 'An existing task' }));
+    const todo = api!.todos[0];
+
+    await act(() => api!.openEdit(todo.id));
+    expect(api!.editingTodo?.id).toBe(todo.id);
+    expect(api!.draftPrefill).toBeNull();
+  });
+});
+
+describe('useTaskScreen — deletion', () => {  beforeEach(async () => {
     await render(controllerTree());
     await settle();
   });

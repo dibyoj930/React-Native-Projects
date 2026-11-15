@@ -1,19 +1,33 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { TimerPickerModal } from 'react-native-timer-picker';
 
 import { AddTodoModal } from './components/AddTodoModal';
 import { AllTasksScreen } from './components/AllTasksScreen';
+import { CareerModule } from './components/career/CareerModule';
 import { GoalsScreen } from './components/GoalsScreen';
 import { HomeScreen } from './components/HomeScreen';
+import { PlanReviewScreen } from './components/PlanReviewScreen';
+import { ReplanScreen } from './components/ReplanScreen';
 import { SettingsScreen } from './components/SettingsScreen';
 import { TodoRow } from './components/TodoRow';
-import { useDailyGoals } from './daily-goals';
-import type { TimerState } from './hooks/useFocusTimer';
-import { useSettings } from './hooks/useSettings';
-import { useTaskScreen } from './hooks/useTaskScreen';
-import { useProductivity } from './productivity';
-import type { Todo } from './todos/model';
+import { useDailyGoals, useProductivityView, useReplan, useSettings, useTaskScreen } from './hooks';
+import { useCareerDevelopment } from './hooks/useCareerDevelopment';
+import { useCareerRecommendations } from './hooks/useCareerRecommendations';
+import { buildNextTaskViewModel } from './hooks';
+import { useReplanSuggestions } from './hooks';
+import { usePlanOutcome } from './hooks';
+import { usePlanReview } from './hooks';
+import { useReflection } from './hooks';
+import type { TimerState } from './hooks';
+import {
+  buildCareerHomeSummary,
+  buildCareerPlanReview,
+  useCareer,
+  type CareerRecommendation,
+} from './career';
+import type { Todo, TodoDraft } from './todos/model';
+import { selectNextTask } from './todos/nextTask';
 import { useTheme } from './theme/useTheme';
 import type { Theme } from './theme/theme';
 
@@ -50,6 +64,9 @@ export type Screen =
   | { name: 'tasks' }
   | { name: 'tag'; tag: string }
   | { name: 'goals' }
+  | { name: 'replan' }
+  | { name: 'planReview' }
+  | { name: 'career' }
   | { name: 'settings' };
 
 export type WelcomeComponentProps = {
@@ -84,14 +101,19 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
   const {
     todos,
     today,
+    hydrated,
+    anyTimerRunning,
+    timerWindowFor,
     notificationsBlocked,
     editingTodo,
+    draftPrefill,
     showTaskSheet,
     pickerVisible,
     setPickerVisible,
     handleTimerConfirm,
     handleTimerCancel,
     openCreate,
+    openEdit,
     closeTaskSheet,
     submitTask,
     exportTodos,
@@ -99,6 +121,9 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
     clearAllTasks,
     tags,
     addTag,
+    focusSessions,
+    setEstimatedMinutes,
+    startFocusFor,
   } = useTaskScreen();
 
   // Settings reaches across four domains; its controller owns the confirmations
@@ -115,14 +140,217 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
   // One hook call means one hydration and one in-memory source of truth.
   const { goals, setGoals } = useDailyGoals();
 
-  // Today's rollup feeds the tile and the goals preview from one place, so the
-  // screen can stay presentational.
-  const { snapshot } = useProductivity();
+  // The productivity controller turns the snapshot and the saved goals into the
+  // two cards' models from one place, so the screens stay presentational. The
+  // raw rollup is returned alongside for the goals screen, whose preview has to
+  // follow the draft rather than the saved goals.
+  const productivity = useProductivityView(goals);
+
+  // The career document is independent of the task and focus stores. The home
+  // card gets a derived summary, not the raw document, so the screen stays a view
+  // and the same derivation is available if other destinations need it later.
+  const career = useCareer();
+  const careerHome = useMemo(
+    () => buildCareerHomeSummary(career.doc, today),
+    [career.doc, today],
+  );
+
+  // The bridge between the two stores. Career never reads tasks and tasks never
+  // write career records; this controller holds both, derives practice, and
+  // supplies the task sheet's link options.
+  const development = useCareerDevelopment({ tasks: todos, sessions: focusSessions });
+
+  // The replan controller owns the proposal, the approved plan and the
+  // preferences. Mounted here because it needs the task list and the timer
+  // windows that `useTaskScreen` holds, and because the approved plan is read by
+  // the rows below. It reconciles its own planned-start reminders.
+  const replan = useReplan({ todos, hydrated, today, timerWindowFor });
+
+  // "What should I do next?" — one task and one action, chosen by the pure
+  // selector so the home screen and the task list agree on the order. The live
+  // timer readout is bound here rather than in the card, so the card stays a
+  // dumb view of a model.
+  const nextTaskSelection = selectNextTask({
+    todos,
+    today,
+    plan: replan.plan,
+    now: Date.now(),
+  });
+  const nextTaskRow = nextTaskSelection ? rowPropsFor(nextTaskSelection.todo) : null;
+  const nextTask = buildNextTaskViewModel({
+    selection: nextTaskSelection,
+    todos,
+    today,
+    timer: nextTaskRow
+      ? { running: nextTaskRow.isRunning, label: nextTaskRow.timerLabel }
+      : undefined,
+  });
+
+  // Today's plan vs actual. Reads the approved plan and the per-task focus
+  // attribution from the productivity snapshot, so the comparison is one
+  // derivation rather than a second copy of the same facts.
+  const outcome = usePlanOutcome({
+    hydrated,
+    dayKey: today,
+    plan: replan.plan,
+    todos,
+    attribution: productivity.attribution,
+    focusSessions,
+  });
+
+  // The 7-day plan review. Reads the session log and the outcome store, derives
+  // rollover across days, and offers advisory estimate calibration. Its one
+  // write — a changed estimate — is wired to the targeted task operation below.
+  const review = usePlanReview({
+    hydrated,
+    today,
+    plan: replan.plan,
+    todos,
+    sessions: focusSessions,
+    onApplyEstimate: setEstimatedMinutes,
+  });
+
+  // The career slice of the same review window. Career rows carry the link that
+  // was snapshotted when the comparison was recorded, and recorded focus comes
+  // only from sessions that carried a career link at the time.
+  const careerReview = useMemo(
+    () =>
+      buildCareerPlanReview({
+        doc: career.doc,
+        days: review.days.map((day) => day.dayKey),
+        outcomes: review.days.map((day) => day.outcome ?? undefined),
+        sessions: focusSessions,
+      }),
+    [career.doc, review.days, focusSessions],
+  );
+
+  // Daily, deterministic development suggestions. The hook measures open time
+  // from today's approved plan so a recommendation never promises more room than
+  // the day has.
+  const recommendations = useCareerRecommendations({
+    development,
+    tasks: todos,
+    today,
+    plan: replan.plan,
+    preferences: replan.preferences,
+    planReview: careerReview,
+  });
+
+  // Contextual suggestions: the plan slipped, or progress fell behind. The
+  // controller never emits while a focus timer runs, so it cannot interrupt one.
+  const suggestions = useReplanSuggestions({
+    hydrated,
+    plan: replan.plan,
+    replanTasks: replan.replanTasks,
+    todos,
+    anyTimerRunning,
+    today,
+    workdayStart: replan.preferences.workdayStart,
+    workdayEnd: replan.preferences.workdayEnd,
+    completedPlannedCount: outcome.outcome.summary.completed,
+    totalPlannedCount: outcome.outcome.summary.totalPlanned,
+  });
+
+  // The end-of-day reflection prompt. Optional and user-dismissible; it never
+  // shows while a timer runs and never touches the plan on its own.
+  const reflection = useReflection({
+    hydrated,
+    dayKey: today,
+    workdayEnd: replan.preferences.workdayEnd,
+    anyTimerRunning,
+    hasPlanToday: replan.hasPlan,
+    taskCount: todos.length,
+  });
+
+  const [reflectionModalOpen, setReflectionModalOpen] = useState(false);
+  const [yesterdayOutcome, setYesterdayOutcome] = useState<
+    Awaited<ReturnType<typeof outcome.loadYesterday>>
+  >(null);
+  // The recommendation whose prefilled task is currently in the sheet. It stays
+  // here until the task is actually created, so cancelling leaves the
+  // recommendation in place for the user to choose again.
+  const [acceptedRecommendationId, setAcceptedRecommendationId] = useState<
+    string | null
+  >(null);
+
+  const acceptRecommendation = (recommendation: CareerRecommendation) => {
+    setAcceptedRecommendationId(recommendation.id);
+    openCreate({
+      text: recommendation.taskText,
+      notes: [
+        recommendation.objective,
+        `Finish when: ${recommendation.completionCriteria}`,
+        `Evidence: ${recommendation.expectedEvidence}`,
+      ].join('\n\n'),
+      estimatedMinutes: recommendation.expectedMinutes,
+      career: recommendation.career,
+    });
+  };
+
+  const closeTaskSheetAndForgetRecommendation = () => {
+    closeTaskSheet();
+    setAcceptedRecommendationId(null);
+  };
+
+  const submitTaskAndSettleRecommendation = (draft: TodoDraft) => {
+    const acceptedId = acceptedRecommendationId;
+    submitTask(draft);
+    if (acceptedId) {
+      // The task now carries the link, so the suggestion has served its purpose.
+      // Dismiss only after a successful submit; a cancel preserves it.
+      career.dismissRecommendation(acceptedId);
+      setAcceptedRecommendationId(null);
+    }
+  };
+
+  // `loadYesterday` is memoised inside `usePlanOutcome` (keyed on the day key),
+  // so it is a stable dependency rather than the whole controller object.
+  const { loadYesterday } = outcome;
+  useEffect(() => {
+    // Both stores must be loaded before a comparison is read or written: a
+    // focus log that has not hydrated yet reads as "no focus today", and a saved
+    // outcome built from it would record a day with the work missing.
+    if (!hydrated || !productivity.hydrated) return;
+    let cancelled = false;
+    loadYesterday().then((loaded) => {
+      if (!cancelled) setYesterdayOutcome(loaded);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [hydrated, productivity.hydrated, loadYesterday]);
+
+  // Persist today's comparison as it evolves, so tomorrow can show "Yesterday".
+  // The signature is the comparison's *counts*, not its focus minutes: focus
+  // ticks every second during a session, and a storage write per second would be
+  // absurd. The final focus figure is captured on reflection submit (below).
+  const savedOutcomeRef = useRef<string>('');
+  useEffect(() => {
+    // `outcome.historyLoaded` too: the day's stored record is merged into the
+    // comparison, and saving before it has loaded would overwrite it with the
+    // reduced view — erasing a legacy completion it alone keeps alive.
+    if (!hydrated || !productivity.hydrated || !replan.hasPlan || !outcome.historyLoaded) {
+      return;
+    }
+    const s = outcome.outcome.summary;
+    const signature = `${today}:${s.totalPlanned}:${s.completed}:${s.completedOnTime}:${s.completedLate}:${s.missed}`;
+    if (savedOutcomeRef.current === signature) return;
+    savedOutcomeRef.current = signature;
+    outcome.saveOutcome().catch(() => {});
+  }, [hydrated, productivity.hydrated, replan.hasPlan, outcome, outcome.historyLoaded, today]);
 
   // The one renderer both lists share. It is a one-liner here rather than in the
   // controller because it is JSX: the controller answers "what are this row's
-  // props", and the view is what turns that into an element.
-  const renderRow = (todo: Todo) => <TodoRow {...rowPropsFor(todo)} />;
+  // props", and the view is what turns that into an element. The approved plan
+  // window is bound here rather than in `rowPropsFor`, so the task controller
+  // stays unaware of the replan layer.
+  const renderRow = (todo: Todo) => (
+    <TodoRow
+      {...rowPropsFor(todo)}
+      careerLabel={development.labelForLink(todo.career)}
+      plannedLabel={replan.plannedLabelFor(todo.id)}
+    />
+  );
 
   // Both sheets are built here, outside the branch, and rendered in both screens.
   // The add sheet has to work from either screen — you can be mid-focus with the
@@ -154,15 +382,36 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
         visible={pickerVisible}
       />
       <AddTodoModal
+        careerOptions={development.options}
+        defaultDraft={editingTodo ? undefined : draftPrefill}
         defaultTag={screen.name === 'tag' ? screen.tag : undefined}
-        onClose={closeTaskSheet}
-        onSubmit={submitTask}
+        onClose={closeTaskSheetAndForgetRecommendation}
+        onSubmit={submitTaskAndSettleRecommendation}
         tags={tags}
         task={editingTodo}
         visible={showTaskSheet}
       />
     </>
   );
+
+  // Career is one app destination with its own internal route union. It shares no
+  // task state and has no sheet to keep open, so it returns before the task-list
+  // branches.
+  if (screen.name === 'career') {
+    return (
+      <View style={styles.screen}>
+        <CareerModule
+          development={development}
+          onAcceptRecommendation={acceptRecommendation}
+          onExit={() => onNavigate({ name: 'home' })}
+          outcomes={review.days.map((day) => day.outcome ?? undefined)}
+          recommendations={recommendations}
+          sessions={focusSessions}
+          tasks={todos}
+        />
+      </View>
+    );
+  }
 
   // Settings is its own destination, back to home, and shares none of the task
   // list. It is a full screen for the same reason the list is: it has somewhere
@@ -173,6 +422,7 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
         <SettingsScreen
           notificationPermission={settings.notificationPermission}
           onBack={() => onNavigate({ name: 'home' })}
+          onClearCareer={settings.confirmClearCareer}
           onClearProductivity={settings.confirmClearProductivity}
           onClearTasks={settings.confirmClearTasks}
           onRequestNotifications={settings.requestNotifications}
@@ -197,8 +447,57 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
             setGoals(next);
             onNavigate({ name: 'home' });
           }}
-          todayRollup={snapshot.todayRollup}
+          todayRollup={productivity.todayRollup}
         />
+      </View>
+    );
+  }
+
+  if (screen.name === 'replan') {
+    // Its own destination, back to home, like Goals and Settings. It holds no
+    // scheduling state of its own: the controller above owns the proposal and
+    // the preferences, and this only renders them and reports intent.
+    return (
+      <View style={styles.screen}>
+        <ReplanScreen
+          proposal={replan.proposal}
+          preferences={replan.preferences}
+          tasksById={replan.tasksById}
+          stale={replan.stale}
+          onGenerate={replan.generate}
+          onApply={() => {
+            // The screen's `onApply` is fire-and-forget; a rejected write must not
+            // surface as an unhandled rejection. Apply itself already refuses
+            // quietly when the state has moved on.
+            replan.apply().catch(() => {});
+          }}
+          onCancel={replan.cancel}
+          onSetPreferences={replan.setPreferences}
+          onEditTask={openEdit}
+          onBack={() => onNavigate({ name: 'home' })}
+        />
+        {sheets}
+      </View>
+    );
+  }
+
+  if (screen.name === 'planReview') {
+    // Its own destination, back to home. Presentational: the `review` controller
+    // above owns the window, the rollover and the calibration suggestions, and
+    // this only renders them and reports which suggestion to apply.
+    return (
+      <View style={styles.screen}>
+        <PlanReviewScreen
+          days={review.days}
+          aggregate={review.aggregate}
+          calibration={review.calibration}
+          careerReview={careerReview}
+          loading={review.loading}
+          taskTextFor={(id) => todos.find((todo) => todo.id === id)?.text}
+          onApplyAdjustment={review.applyAdjustment}
+          onBack={() => onNavigate({ name: 'home' })}
+        />
+        {sheets}
       </View>
     );
   }
@@ -234,16 +533,41 @@ export default function WelcomeComponent({ screen, onNavigate }: WelcomeComponen
     <View style={styles.screen}>
       <HomeScreen
         notificationsBlocked={notificationsBlocked}
-        goals={goals}
+        today={productivity.today}
+        nextTask={nextTask}
+        onStartFocus={startFocusFor}
+        history={productivity.history}
         onAddTag={addTag}
         onAddTask={openCreate}
         onExport={exportTodos}
+        career={careerHome}
+        onOpenCareer={() => onNavigate({ name: 'career' })}
         onOpenGoals={() => onNavigate({ name: 'goals' })}
         onOpenSettings={() => onNavigate({ name: 'settings' })}
+        onOpenReplan={() => onNavigate({ name: 'replan' })}
+        onOpenPlanReview={() => onNavigate({ name: 'planReview' })}
+        replanAvailable={!anyTimerRunning}
         onOpenTag={(tag) => onNavigate({ name: 'tag', tag })}
         onOpenTasks={() => onNavigate({ name: 'tasks' })}
         tags={tags}
         todos={todos}
+        suggestions={suggestions.suggestions}
+        onDismissSuggestion={suggestions.dismiss}
+        onRemindLaterSuggestion={suggestions.remindLater}
+        todayOutcome={replan.hasPlan ? outcome.outcome : undefined}
+        yesterdayOutcome={yesterdayOutcome ?? undefined}
+        showReflectionPrompt={reflection.canReflect}
+        onOpenReflection={() => setReflectionModalOpen(true)}
+        onDismissReflection={reflection.dismiss}
+        reflectionModalVisible={reflectionModalOpen}
+        onSubmitReflection={async (data) => {
+          await reflection.submit(data);
+          // End of day is the natural moment to freeze the final comparison,
+          // including the focus minutes the coarse auto-save above skips.
+          await outcome.saveOutcome().catch(() => {});
+          setReflectionModalOpen(false);
+        }}
+        onCloseReflection={() => setReflectionModalOpen(false)}
       />
       {sheets}
     </View>

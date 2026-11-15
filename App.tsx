@@ -12,6 +12,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import WelcomeComponent, { type Screen } from './WelcomeComponent';
+import { CareerProvider } from './career';
 import { useReminders } from './hooks/useReminders';
 import { NotificationProvider, useNotifications } from './notifications';
 import { ProductivityProvider } from './productivity';
@@ -30,6 +31,9 @@ import type { Theme } from './theme/theme';
  *   NotificationProvider    before Productivity, which is mounted inside it.
  *   ProductivityProvider    above WelcomeComponent, which both feeds tasks into
  *                           it and reads statistics back out.
+ *   CareerProvider          independent of tasks and focus history; mounted above
+ *                           WelcomeComponent so career screens and the home entry
+ *                           can share one hydrated document.
  */
 function App() {
   const t = useTheme();
@@ -41,11 +45,13 @@ function App() {
         <ThemeProvider>
           <NotificationProvider>
             <ProductivityProvider>
-              <StatusBar
-                barStyle={t.mode === 'dark' ? 'light-content' : 'dark-content'}
-                backgroundColor={t.colors.background}
-              />
-              <AppContent />
+              <CareerProvider>
+                <StatusBar
+                  barStyle={t.mode === 'dark' ? 'light-content' : 'dark-content'}
+                  backgroundColor={t.colors.background}
+                />
+                <AppContent />
+              </CareerProvider>
             </ProductivityProvider>
           </NotificationProvider>
         </ThemeProvider>
@@ -57,9 +63,9 @@ function App() {
 /**
  * Owns which screen is showing.
  *
- * This is the app's entire navigation: one piece of state with five values, held
+ * This is the app's entire navigation: one piece of state with six values, held
  * above the component that needs it. There is no router here and none is warranted
- * — five destinations do not need a stack, a back stack or a dependency, and the
+ * — six destinations do not need a stack, a back stack or a dependency, and the
  * screens swap by rendering one or the other.
  *
  * The state lives out here rather than inside `WelcomeComponent` because that

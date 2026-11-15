@@ -1,9 +1,10 @@
 # MyApp — Architecture
 
 A local-first React Native productivity app: a task list with per-task focus
-timers, OS notifications, a focus-session log with streaks/momentum, and a light
-theme system. It has no backend and no accounts; every fact the app renders is
-either in memory or one of five AsyncStorage keys.
+timers, OS notifications, a focus-session log with streaks/momentum, adaptive
+daily replanning, a light theme system, and a career growth record. It has no
+backend and no accounts; every fact the app renders is either in memory or one
+of nine AsyncStorage keys.
 
 This document is the map: what the layers are, which one owns which fact, how
 data moves between them, and the invariants that hold the whole thing together.
@@ -46,9 +47,12 @@ tests and the module layout both assume them.
                     └───────────────┬──────────────────────────────┘
                                     │ reads controllers
                     ┌───────────────▼──────────────────────────────┐
-   Controllers      │  hooks/useTaskScreen   hooks/useSettings       │
-   (impure)         │  hooks/useTimerOrchestration, useFocusTimer    │
-                    │  hooks/useReminders, useTaskReminders          │
+   Controllers      │  hooks/useTaskScreen   useProductivityView     │
+   (impure)         │  useTimerOrchestration, useFocusTimer          │
+                    │  useReminders, useTaskReminders                │
+                    │  useTasks, useCustomTags, useDailyGoals         │
+                    │  useReplan, usePlanReminders                   │
+                    │  useSettings                                   │
                     └───────┬───────────┬──────────┬───────────────┘
                             │           │          │
         ┌───────────────────▼──┐  ┌─────▼───────┐  ┌▼─────────────────┐
@@ -57,14 +61,24 @@ tests and the module layout both assume them.
         └──────────────────────┘  └─────────────┘  └───────────────────┘
                             │           │          │
                     ┌───────▼───────────▼──────────▼───────────────┐
-   Adapters         │  AsyncStorage (3 keys)   Notifee (OS triggers) │
+   Adapters         │  AsyncStorage (9 keys)   Notifee (OS triggers) │
                     └───────────────────────────────────────────────┘
 ```
+
+`shared/date.ts` is a pure leaf under both `todos/` and `productivity/`: the local
+day-key type and date maths both domains need, owned by neither. A controller is
+a hook in `hooks/` — the domain modules no longer hold any.
+
+`replan/` is a fourth pure domain, drawn out of the diagram purely for legibility:
+it turns the task list and the day's free time into a proposed schedule, and
+imports no React, RN or storage except in `replan/planStorage.ts`. For the same
+reason `shared/` is not a box.
 
 The rule of thumb: a **component** renders, a **controller** decides across
 domains, a **domain module** is pure and testable without a renderer, and an
 **adapter** (`taskRepository`, `notificationService`, `productivity/storage`,
-`ThemeProvider`) is the only place a native module is touched.
+`replan/planStorage`, `ThemeProvider`) is the only place a native module is
+touched.
 
 ## Domains
 
@@ -79,13 +93,20 @@ domains, a **domain module** is pure and testable without a renderer, and an
 | `timeKey.ts` | `'HH:mm'` validation, `timeKeyFromDate`, `formatTimeLabel` | ✅ |
 | `taskReminders.ts` | `dueAt`, `planTaskReminders` (which reminders to schedule) | ✅ |
 | `tags.ts` | Tag vocabulary + accent/tint/contrast helpers | pure (colour literals exempt) |
+| `rowViewModel.ts` | `TodoRowProps` — the contract a row's controller builds to | ✅ |
 | `taskRepository.ts` | Load/save `Todo[]`, `buildExportPayload`, filename | impure (AsyncStorage) |
-| `useTasks.ts` | List state + CRUD + load/save guard | React hook |
+
+The list's state and persistence are a controller (`hooks/useTasks`), not a domain
+file: nothing under `todos/` is a React hook any more.
 
 The `Todo` is the app's central record: `id`, `text`, `completed`, optional
-`tags`, `createdAt`, `completedAt`, `notes`, `dueDate` (`DayKey`), and `dueTime`
-(`TimeKey`). Storage is shape-checked on load (`migrateTodos`), so a malformed
-field costs the field, never the task.
+`tags`, `createdAt`, `completedAt`, `notes`, `dueDate` (`DayKey`), `dueTime`
+(`TimeKey`), and the optional scheduling fields the replanner reads — `priority`
+(`high | medium | low`), `estimatedMinutes`, `schedulingMode` (`fixed |
+flexible`) and `fixedStartAt`. Storage is shape-checked on load (`migrateTodos`),
+so a malformed field costs the field, never the task; `priority` is deliberately
+left absent for legacy tasks (absent means `low`), and a scheduling field is only
+kept while it is coherent.
 
 ### `productivity/` — pure scoring
 
@@ -93,7 +114,9 @@ The focus log and everything derived from it. `productivity/domain.ts` is the
 pure barrel (no React Native, no storage) re-exported by `productivity/index.ts`
 alongside the provider.
 
-- `dateKey.ts` — local day keys, `todayKey`, `addDays`, `localDateFromDayKey`.
+- `dateKey.ts` — re-exports `shared/date.ts` (local day keys, `todayKey`, `addDays`).
+- `focusChart.ts` — the focus chart's bar view model (`buildFocusChart`).
+- `milestones.ts` — the focus-milestone ladder (`focusTargetMinutes`, `focusFillPercent`).
 - `sessions.ts` — start/pause/resume/close session math.
 - `attribution.ts` — joins sessions to tasks ("was this completed by the timer?").
 - `rollups.ts`, `streak.ts`, `momentum.ts`, `mission.ts` — derived statistics.
@@ -104,6 +127,73 @@ alongside the provider.
 
 Task data is **fed in** (`setTasks`) rather than owned here, so there is one
 source of truth for tasks while scoring can still read them.
+
+### `replan/` — pure daily planning
+
+Turns a task list, the workday, and the day's commitments into a proposed
+schedule, and stores the one the user approves. Pure except for the storage file;
+the barrel `replan/domain.ts` deliberately excludes `planStorage`.
+
+- `types.ts` — contracts only (`ReplanTask`, `ReplanInput`, `ReplanProposal`,
+  `DayPlan`, `ReplanPreferences`, `ReplanDoc`).
+- `interval.ts` — half-open `[start, end)` maths, free-segment subtraction.
+- `preferences.ts` — `DEFAULT_REPLAN_PREFERENCES` + `sanitizeReplanPreferences`.
+- `normalize.ts` — the only place raw `Todo`s are read; builds `ReplanInput`
+  (`normalizeReplanTasks`, `collectCommitments`, `computeSignature`).
+- `rank.ts` — `compareReplanTasks` (priority, then deadline, then duration).
+- `engine.ts` — `buildReplanProposal`, the deterministic core.
+- `validate.ts` — re-checks a proposal's placements (no overlap, inside workday).
+- `explain.ts` — `formatClock` and the reason-code copy.
+- `planReminders.ts` — `planStartReminders`, the pure planned-start planner.
+- `planOutcome.ts` — `computePlanOutcome`, the single-day plan-vs-actual
+  classification. A task completed today stays in the comparison even when a
+  rebuild drops it from the plan; a completion with no `completedAt` (recorded
+  before that field existed) is kept alive by merging the day's persisted outcome.
+- `rollover.ts` — `deriveRollover`, `finalizeOutcome`, `aggregateOutcomes` (7-day
+  window maths; a missing day is unknown, not empty).
+- `planOutcomeStorage.ts` — sanitised outcome history (`@replan-outcomes/v1`).
+- `planStorage.ts` and `planOutcomeStorage.ts` — the storage edge; both are
+  excluded from `domain.ts`, so the pure barrel never pulls in AsyncStorage.
+
+The engine **never mutates tasks** and never rewrites `dueDate`/`dueTime`: it
+returns a *proposal*, and an approval writes one `DayPlan` in one `setItem`, so
+applying can never half-succeed across keys. Intervals are half-open
+`[start, end)`; the usable window never begins before `now`.
+
+### `career/` — the career development record
+
+A profession-neutral record of direction, skills, goals, milestones, evidence,
+achievements, assessments and periodic reviews. The career document never owns a
+task or a focus session. The only link is one-way: a task may carry an optional
+career reference, and a focus session copies that reference when it starts. The
+career side derives linked tasks and practice from those facts at read time.
+
+- `types.ts` — contracts, constants and labels. Goal types are generic
+  (`performance`, `skill`, `promotion`, `transition`, …), not job titles.
+- `defaults.ts` — suggested development areas. Every one can be renamed,
+  disabled or removed; none is a claim about the user's profession.
+- `factory.ts` — id/timestamp assignment and document seeding. Pure.
+- `migrations.ts` — versioned storage upgrades before sanitising. v1 → v2 maps
+  `profile.currentRole` → `designation`, `goal.category` → `goalType`, and the
+  single skill `importance` onto `roleImportance`/`futureImportance`.
+- `sanitize.ts` — field-by-field repair. It drops a record that cannot be
+  meaningful and never invents progress, a date, or a score.
+- `reducer.ts` — referential rules: archiving preserves history, hard deletes
+  unlink with a title snapshot, deleting a skill only unlinks references.
+- `selectors.ts`, `progress.ts` — derived views and ratios. A ratio exists only
+  where a real denominator exists (completed milestones / defined milestones).
+- `linkage.ts` — pure task/focus → career derivation. It resolves ids against the
+  current document, counts linked tasks and explicitly attributed focus, and
+  ignores dangling references. It never writes to the career document.
+- `storage.ts` — the only career file that touches AsyncStorage; one
+  `@career/v1` key and one serialized mutation queue.
+- `CareerProvider.tsx` — hydration, reducer dispatch and an 800 ms debounced
+  save. It stamps the clock so the reducer stays deterministic.
+
+`components/career/` holds a local route union and the screens. The module is
+mounted from the home screen. It does not read the task store directly: the
+cross-domain `hooks/useCareerDevelopment` holds the career document, task list and
+focus log, memoises the linkage model, and passes it into the module.
 
 ### `notifications/` — the OS boundary
 
@@ -126,16 +216,24 @@ library and is optional at runtime.
 
 | Fact | Owner | Persisted? |
 |---|---|---|
-| Task list | `todos/useTasks` (`useState`) | `todos` key |
-| Focus sessions, streak ledger, momentum memory | `ProductivityProvider` (`useReducer`) | `productivity` key |
+| Task list | `hooks/useTasks` (`useState`) | `todos` key |
+| Focus sessions, open sessions, streak ledger, momentum memory | `ProductivityProvider` (`useReducer`) | `productivity` key |
 | Focus timers (running/paused) | `useFocusTimer` (refs + mirrored state) | OS trigger only |
 | Active/edit sheet visibility | `hooks/useTaskScreen` | no |
 | Current screen | `App.AppContent` (`Screen` union) | no |
 | Notification permission + banner | `NotificationProvider` | no (asked each launch) |
 | Pending reminders (daily/streak) | Notifee, reconciled by `useReminders` | OS triggers |
 | Per-task reminders | Notifee, reconciled by `useTaskReminders` | OS triggers |
-| Daily goals | `useDailyGoals` in `WelcomeComponent` | `@daily-goals/v1` key |
+| Planned-start reminders | Notifee, reconciled by `usePlanReminders` | OS triggers |
+| Daily goals | `hooks/useDailyGoals` in `WelcomeComponent` | `@daily-goals/v1` key |
 | Goals draft (unsaved fields) | `GoalsScreen` local state | no |
+| Approved plan + replan preferences | `hooks/useReplan` in `WelcomeComponent` | `@replan/v1` key |
+| Replan proposal (unapproved) | `hooks/useReplan` (in-memory) | no |
+| Career document (profile, goals, skills, evidence, achievements, assessments, reviews) | `CareerProvider` (`useReducer`) | `@career/v1` key |
+| Career link on a task | `Todo.career` in `hooks/useTasks` | `todos` key |
+| Career attribution of a focus session | `FocusSession.career` snapshot owned by `ProductivityProvider` | `@productivity/v1` key |
+| Linked tasks + career practice | `hooks/useCareerDevelopment` (derived, never stored) | no |
+| Career route (overview, goals, skills, …) | `CareerModule` local state | no |
 | Theme override | `ThemeProvider` | `theme.preference` key |
 | Editing draft + modal form | `AddTodoModal` local state | n/a |
 
@@ -149,27 +247,39 @@ GestureHandlerRootView   swipe gestures must reach rows first
     ThemeProvider        StatusBar + all children observe one appearance
       NotificationProvider   owns permission + tap intent
         ProductivityProvider  mounted inside notifications; feeds WelcomeComponent
-          AppContent         owns the Screen union; useReminders + deep-link here
+          CareerProvider      independent of tasks and focus; mounted above the screen union
+            AppContent         owns the Screen union; useReminders + deep-link here
 ```
 
 `AppContent` is the app's entire navigation: a single `Screen` union
-(`home | tasks | tag | goals | settings`) held above `WelcomeComponent`. No router
-is used because five destinations do not need a stack; the screens swap by
-rendering one or the other, and Android hardware back is handled explicitly.
+(`home | tasks | tag | goals | replan | settings | career`) held above `WelcomeComponent`.
+No router is used because seven destinations do not need a stack; the screens swap
+by rendering one or the other, and Android hardware back is handled explicitly.
 
 `WelcomeComponent` is the composition point: it reads `useTaskScreen()` once,
-the settings controller once, the daily-goals hook once, and switches on
-`screen`. Both sheets (`AddTodoModal`, `TimerPickerModal`) are built once here
-and rendered in every branch, so they cannot drift between screens.
+the settings controller once, the daily-goals hook once, the replan controller
+once, and switches on `screen`. Both sheets (`AddTodoModal`, `TimerPickerModal`)
+are built once here and rendered in every branch, so they cannot drift between
+screens.
 
 ## Controllers
+
+`hooks/` holds every controller; `hooks/index.ts` is the layer's public surface,
+which the composition point imports. Inside the folder, a controller imports its
+siblings by path so the graph stays visible.
 
 - **`useTaskScreen`** is the primary container. It composes `useTasks`,
   `useTimerOrchestration`, `useProductivity`, and `useTaskReminders`, then owns
   the rules that span them: timer expiry completes its task and closes the
   session `completed`; delete cancels the timer, closes the session `stopped`,
   then removes the task; completion checks the timer and lock guards before
-  writing; `rowPropsFor` builds each row's props.
+  writing; `rowPropsFor` builds each row's props. When focus starts, it passes the
+  task's career link into the session so later task edits cannot rewrite time
+  already spent.
+- **`useCareerDevelopment`** is the career-side container. It reads the career
+  document, task list and focus log, and memoises `buildCareerDevelopment`. The
+  resulting model supplies task-sheet options, row labels and the practice shown
+  on goal and skill detail. It performs no writes.
 - `useTasks` owns only the list and its CRUD/persistence.
 - `useTimerOrchestration` wraps `useFocusTimer` and supplies the other side of
   every timer event (start/pause/stop/expiry) plus notification scheduling.
@@ -177,9 +287,27 @@ and rendered in every branch, so they cannot drift between screens.
   and restore from an absolute end time.
 - `useReminders` reconciles the daily/streak plan; `useTaskReminders` reconciles
   per-task reminders.
+- `useReplan` owns the replan proposal and the approved plan: it hydrates
+  `@replan/v1`, builds a proposal from the current tasks (via the pure engine),
+  and applies one — re-checking the signature and the workday end first. It also
+  exposes `plannedLabelFor` for the rows and the engine-view `tasksById`.
+- `usePlanReminders` reconciles the approved plan's start reminders
+  (`plan-<taskId>`), opt-in and gated on hydration. Each reconciler filters the
+  OS's pending set to **its own id namespace**, so the daily/streak, task and
+  planned passes cannot cancel one another.
 - `useDailyGoals` owns the user's daily targets: one hydration, one in-memory
   value shared by the home tile and the Goals & Preferences screen, and
   fire-and-forget writes under the `@daily-goals/v1` key.
+- `useProductivityView` turns the productivity snapshot and the saved goals into
+  the two home cards' models (`TodayViewModel`, `HistoryViewModel`), so
+  `TodayCard` and `ProductivityDashboard` stay presentational. It also builds the
+  next-task card's model (`buildNextTaskViewModel`) and reports whether the focus
+  log has `hydrated`, which gates any write built from the snapshot.
+- `todos/nextTask.ts` holds `selectNextTask`, the pure "what should I do next?"
+  decision: today's approved plan window first (the one happening now, else the
+  soonest to come), then the list's own `groupTodos` order (overdue → today →
+  upcoming → undated). The card that leads the home screen renders only what the
+  selector and `buildNextTaskViewModel` decide.
 - `useSettings` owns confirmations and cross-domain resets for the Settings
   screen.
 
@@ -207,24 +335,74 @@ row.onStartFocus → openTimerPicker → TimerPickerModal confirm
       → useFocusTimer.start (absolute end time) + scheduleTimerNotification
 expiry (1s tick OR AppState→active) → onExpire
   → useTaskScreen.handleTimerExpired → completeTodos(ids) + finishFocus('completed')
-restore on mount → getPendingTimers() → useFocusTimer.restore / treat past as expiry
+restore on mount (gated on both stores hydrating) → getPendingTimers()
+  → useFocusTimer.restore / treat past as expiry
 ```
+
+The open session is persisted under `@productivity/v1`, and each credit
+(`pauseSession`, `focusedSecondsAt`, `closeSession`) is clamped to the session's
+`expiresAt` — the timer's own end time. So an app killed mid-focus and reopened
+later banks the minutes the timer could have run, never the wall-clock gap.
+Restore waits for hydration so an already-passed pending timer closes the
+persisted session rather than firing before it has loaded.
 
 A timer is "running" iff it has an entry in `endsRef`; there is no separate
 running flag. The countdown display is derived from an absolute epoch, so
 backgrounding cannot desynchronise it.
+
+### Home screen layout
+
+The home screen leads with the question its user is usually asking — what to do
+next — then answers how the day is going, then offers the less-used destinations:
+
+```
+NextTaskCard   (selectNextTask + buildNextTaskViewModel; Start focus → existing picker)
+TodayCard      (compact progress: momentum + the two goals)
+plan overview  (open count + the `+` that opens the tasks list)
+Replan / Plan review rows   (suppressed while a focus timer runs)
+Tags index
+plan-vs-actual + reflection prompts
+history bars (ProductivityDashboard)
+export footer
+```
+
+`NextTaskCard` reuses the row's Start Focus flow (`useTaskScreen.startFocusFor`),
+so there is still exactly one timer. `selectNextTask` reuses the list's ordering
+rules; when nothing is scheduled it documents and uses the `groupTodos` fallback
+rather than inventing a new order.
 
 ### Reminders
 
 ```
 useReminders (App, under both providers):
   planReminders(now, streak, todayComplete)  vs  getPendingReminders()  → reconcile
+usePlanReminders (useReplan, beside the task list):
+  planStartReminders(plan, tasks, now)       vs  getPendingReminders()  → reconcile
 useTaskReminders (useTaskScreen, under the task list):
   planTaskReminders(todos, now)              vs  getPendingTaskReminders() → reconcile
 ```
 
-Both are idempotent: schedule what is missing, cancel what is no longer wanted.
-The plans are pure; the hooks own only side effects.
+All three are idempotent: schedule what is missing, cancel what is no longer
+wanted. The plans are pure; the hooks own only side effects. Each reads only the
+pending entries in **its own id namespace** (`daily-`/`streak-`, `plan-`,
+`task-reminder-`), so none can cancel another's.
+
+### Daily replan
+
+```
+Home "Replan my day" → screen { name: 'replan' } → ReplanScreen
+  Build → useReplan.generate()
+      normalizeReplanTasks(todos, timerWindows) + collectCommitments(fixed tasks)
+        → buildReplanProposal(input)   (pure engine; declares, never mutates)
+  Apply → useReplan.apply()
+      re-check signature + workday end  → savePlan(...)   ONE setItem @replan/v1
+      → usePlanReminders reconciles the plan's start reminders
+  Cancel → drop the in-memory proposal (nothing was persisted)
+```
+
+A running focus timer is a protected interval, so the plan is built around it;
+the home entry is suppressed entirely while one runs. Completed, fixed and
+active-timer tasks are reported `protected` and never moved.
 
 ### Notification tap (deep link)
 
@@ -249,22 +427,38 @@ These are the rules most likely to be broken by a well-meaning change:
    disabled checkbox. Both are enforced by `taskRules` **and** re-checked in the
    controller so a stray tap cannot double-count.
 3. **Notification id/data-key namespacing:**
-   `todoId` = running timer, `reminder` = daily/streak, `taskReminder` = task.
-   A reader must only match its own key.
+   `todoId` = running timer, `reminder` = daily/streak **and** planned starts
+   (`plan-<taskId>`), `taskReminder` = task. A reader must only match its own key,
+   and each reconciler must cancel only ids in its own namespace — see
+   `isDailyOrStreakReminderId`.
 4. **`Notifee` repeating triggers are Android-only**, so every reminder is a
    one-shot timestamp reconciled on each relevant change.
-5. **Storage keys are independent** (`todos`, `productivity`, theme preference):
+5. **Storage keys are independent** (`todos`, `productivity`, theme preference,
+   custom tags, daily goals, replan, replan outcomes, reflections, career):
    clearing one never touches another.
 6. **Components hold no colours**; `theme.test.ts` enforces it over the source.
-7. **No router, no new state library.** Four screens and one flat reducer do not
-   need either.
+7. **No router, no new state library.** Seven destinations and one flat reducer
+   do not need either.
+
+## Known follow-ups
+
+Two presentational strings were deliberately left in place: each needs a copy
+decision before it needs a selector, so moving them would have been motion
+without a test behind it.
+
+1. **The home screen's task tile title.** `HomeScreen` still writes the
+   `All tasks` / `1 open of N` line inline. The wording (and its pluralisation)
+   belongs next to the other list copy in `todos/taskSelectors` once it settles.
+2. **The Goals editor's preview copy.** `GoalsScreen` builds its preview strings
+   inline; their natural home is beside `motivationFor` in `daily-goals/goals.ts`.
 
 ## Testing strategy
 
 The test layout mirrors the layers, which is deliberate: a pure-domain test
 needs no renderer, and if it ever does, the architecture has regressed.
 
-- `__tests__/productivity/`, `__tests__/todos/` — pure logic, no renderer.
+- `__tests__/productivity/`, `__tests__/todos/`, `__tests__/replan/` — pure logic,
+  no renderer.
 - `__tests__/notifications/` — the Notifee boundary against mocks, plus the pure
   reminder planner.
 - `__tests__/hooks/` — controllers via a thin probe component.

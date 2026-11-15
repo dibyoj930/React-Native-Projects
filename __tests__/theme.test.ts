@@ -33,10 +33,32 @@ const THEMED_SOURCES = [
   join('components', 'AddTodoModal.tsx'),
   join('components', 'HomeScreen.tsx'),
   join('components', 'TodayCard.tsx'),
+  join('components', 'NextTaskCard.tsx'),
   join('components', 'GoalMeter.tsx'),
   join('components', 'GoalsScreen.tsx'),
   join('components', 'ProductivityDashboard.tsx'),
   join('components', 'SettingsScreen.tsx'),
+  join('components', 'ReplanScreen.tsx'),
+  join('components', 'ReplanTimeline.tsx'),
+  join('components', 'SuggestionBanner.tsx'),
+  join('components', 'ReplanSuggestionSheet.tsx'),
+  join('components', 'PlanOutcomeSummary.tsx'),
+  join('components', 'PlanOutcomeList.tsx'),
+  join('components', 'PlanReviewScreen.tsx'),
+  join('components', 'ReflectionPromptBanner.tsx'),
+  join('components', 'ReflectionModal.tsx'),
+  join('components', 'DevPreviewBar.tsx'),
+  join('components', 'career', 'CareerUI.tsx'),
+  join('components', 'career', 'CareerModule.tsx'),
+  join('components', 'career', 'CareerOverviewScreen.tsx'),
+  join('components', 'career', 'CareerProfileScreen.tsx'),
+  join('components', 'career', 'CareerDomainsScreen.tsx'),
+  join('components', 'career', 'CareerGoalsScreen.tsx'),
+  join('components', 'career', 'CareerGoalDetailScreen.tsx'),
+  join('components', 'career', 'CareerSkillsScreen.tsx'),
+  join('components', 'career', 'CareerSkillDetailScreen.tsx'),
+  join('components', 'career', 'CareerMilestonesScreen.tsx'),
+  join('components', 'career', 'CareerAchievementsScreen.tsx'),
 ];
 
 /**
@@ -127,9 +149,10 @@ describe('theme discipline', () => {
     const known = [
       'TodoRow', 'AllTasksScreen', 'AddTodoModal', 'HomeScreen', 'TodayCard',
       'GoalMeter', 'GoalsScreen', 'ProductivityDashboard', 'SettingsScreen',
+      'ReplanScreen', 'ReplanTimeline', 'PlanReviewScreen',
     ];
     expect(THEMED_SOURCES.filter((p) => p.startsWith('components'))).toHaveLength(
-      known.length,
+      known.length + 19,
     );
   });
 });

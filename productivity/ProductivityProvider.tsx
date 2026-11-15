@@ -8,6 +8,8 @@ import React, {
   useState,
 } from 'react';
 
+import type { CareerLink } from '../shared/careerLink';
+
 import type { Attribution } from './attribution';
 import { localDateKey, startOfDay } from './dateKey';
 import {
@@ -22,7 +24,7 @@ import {
 } from './reducer';
 import { closeSession, nextSessionId, pauseSession, resumeSession, startSession } from './sessions';
 import { loadProductivity, saveProductivity, clearProductivity } from './storage';
-import type { ActiveSession, CompletionRecord, FocusSessionStatus } from './types';
+import type { ActiveSession, CompletionRecord, FocusSession, FocusSessionStatus } from './types';
 
 /**
  * Owns the productivity system: the focus-session log, the streak ledger, and
@@ -43,10 +45,37 @@ import type { ActiveSession, CompletionRecord, FocusSessionStatus } from './type
 
 interface ProductivityContextValue {
   snapshot: ProductivitySnapshot;
+  /**
+   * The closed focus-session log, newest last.
+   *
+   * Exposed because per-day plan review must read the authoritative session
+   * record itself rather than a derived all-time total; reading it from storage a
+   * second time would risk disagreeing with the snapshot the rest of the app
+   * shows.
+   */
+  sessions: readonly FocusSession[];
   /** Feeds the current task list into the scoring layer. */
   setTasks: (tasks: readonly CompletionRecord[]) => void;
-  /** Opens a focus session for a task. Closes any session it already had. */
-  startFocus: (taskId: string) => void;
+  /**
+   * True once the persisted focus log has loaded.
+   *
+   * Read by the composition point so a write built from the snapshot — the daily
+   * plan outcome, most importantly — cannot run against the empty pre-hydration
+   * state and record a day with no focus in it.
+   */
+  hydrated: boolean;
+  /**
+   * Opens a focus session for a task. Closes any session it already had.
+   *
+   * `expiresAt` is the timer's own end time, when one is known; it bounds the
+   * session's credit so a session restored after a relaunch cannot out-accrue
+   * its timer.
+   *
+   * `career` is the task's career link at this instant. It is copied onto the
+   * session so the focused time remains attributable after the task is edited or
+   * deleted; productivity never reads the task list to answer that later.
+   */
+  startFocus: (taskId: string, expiresAt?: number, career?: CareerLink) => void;
   pauseFocus: (taskId: string) => void;
   resumeFocus: (taskId: string) => void;
   /** Closes the task's open session. A no-op when none is open. */
@@ -200,7 +229,7 @@ export function ProductivityProvider({ children }: { children: React.ReactNode }
     setTasksState((prev) => (prev === next ? prev : next));
   }, []);
 
-  const startFocus = useCallback((taskId: string) => {
+  const startFocus = useCallback((taskId: string, expiresAt?: number, career?: CareerLink) => {
     const now = Date.now();
     const existing = stateRef.current.active[taskId];
 
@@ -215,7 +244,7 @@ export function ProductivityProvider({ children }: { children: React.ReactNode }
       });
     }
 
-    const session = startSession(nextSessionId(now), taskId, now);
+    const session = startSession(nextSessionId(now), taskId, now, expiresAt, career);
     dispatch({ type: 'startFocus', taskId, session });
   }, []);
 
@@ -276,7 +305,9 @@ export function ProductivityProvider({ children }: { children: React.ReactNode }
   const value = useMemo(
     () => ({
       snapshot,
+      sessions: state.sessions,
       setTasks,
+      hydrated: state.hydrated,
       startFocus,
       pauseFocus,
       resumeFocus,
@@ -287,6 +318,8 @@ export function ProductivityProvider({ children }: { children: React.ReactNode }
     }),
     [
       snapshot,
+      state.sessions,
+      state.hydrated,
       setTasks,
       startFocus,
       pauseFocus,

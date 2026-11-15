@@ -690,6 +690,192 @@ describe('AddTodoModal — the # tag button', () => {
   });
 });
 
+describe('AddTodoModal — priority and estimate', () => {
+  it('stores neither unless the user chooses one', async () => {
+    const onSubmit = jest.fn<void, [TodoDraft]>();
+    await withRendered(element({ onSubmit }), async (renderer) => {
+      await type(renderer, 'Task title', 'Buy milk');
+      await press(renderer, 'Add task');
+    });
+    const draft = persisted(onSubmit.mock.calls[0][0]);
+    expect(draft).not.toHaveProperty('priority');
+    expect(draft).not.toHaveProperty('estimatedMinutes');
+  });
+
+  it('starts both on None, so an untouched task is not silently important', async () => {
+    await withRendered(element(), (renderer) => {
+      expect(byLabel(renderer, 'Priority: None').props.accessibilityState).toEqual({
+        selected: true,
+      });
+      expect(byLabel(renderer, 'Estimate: None').props.accessibilityState).toEqual({
+        selected: true,
+      });
+    });
+  });
+
+  it('hands the chosen priority to the draft', async () => {
+    const onSubmit = jest.fn<void, [TodoDraft]>();
+    await withRendered(element({ onSubmit }), async (renderer) => {
+      await type(renderer, 'Task title', 'Ship the release');
+      await press(renderer, 'Priority: High');
+      await press(renderer, 'Add task');
+    });
+    expect(persisted(onSubmit.mock.calls[0][0]).priority).toBe('high');
+  });
+
+  it('hands the chosen estimate, in whole minutes, to the draft', async () => {
+    const onSubmit = jest.fn<void, [TodoDraft]>();
+    await withRendered(element({ onSubmit }), async (renderer) => {
+      await type(renderer, 'Task title', 'Write the report');
+      await press(renderer, 'Estimate: 45m');
+      await press(renderer, 'Add task');
+    });
+    expect(persisted(onSubmit.mock.calls[0][0]).estimatedMinutes).toBe(45);
+  });
+
+  it('lets a choice be taken back to None', async () => {
+    const onSubmit = jest.fn<void, [TodoDraft]>();
+    await withRendered(element({ onSubmit }), async (renderer) => {
+      await type(renderer, 'Task title', 'Buy milk');
+      await press(renderer, 'Priority: Low');
+      await press(renderer, 'Priority: None');
+      await press(renderer, 'Estimate: 15m');
+      await press(renderer, 'Estimate: None');
+      await press(renderer, 'Add task');
+    });
+    const draft = persisted(onSubmit.mock.calls[0][0]);
+    expect(draft).not.toHaveProperty('priority');
+    expect(draft).not.toHaveProperty('estimatedMinutes');
+  });
+
+  it('prefills the task being edited with its own priority and estimate', async () => {
+    const TASK: Todo = {
+      id: 't9',
+      text: 'Write the report',
+      completed: false,
+      tags: [],
+      createdAt: 1,
+      priority: 'high',
+      estimatedMinutes: 45,
+    };
+    await withRendered(element({ task: TASK }), (renderer) => {
+      expect(byLabel(renderer, 'Priority: High').props.accessibilityState).toEqual({
+        selected: true,
+      });
+      expect(byLabel(renderer, 'Estimate: 45m').props.accessibilityState).toEqual({
+        selected: true,
+      });
+    });
+  });
+
+  it('prefills a caller supplied new-task draft without treating it as an edit', async () => {
+    const onSubmit = jest.fn<void, [TodoDraft]>();
+    await withRendered(
+      element({
+        defaultDraft: {
+          text: 'Career: practice facilitation',
+          notes: 'Finish when one exercise is done.',
+          estimatedMinutes: 25,
+          career: { goalId: 'goal-1' },
+        },
+        careerOptions: {
+          goals: [{ id: 'goal-1', title: 'Grow into a lead', milestones: [] }],
+          skills: [],
+        },
+        onSubmit,
+      }),
+      async (renderer) => {
+        expect(visibleText(renderer)).toContain('New task');
+        expect(byLabel(renderer, 'Estimate: 25m').props.accessibilityState).toEqual({
+          selected: true,
+        });
+        await press(renderer, 'Choose career link');
+        expect(byLabel(renderer, 'Career goal: Grow into a lead').props.accessibilityState).toEqual({
+          selected: true,
+        });
+        await press(renderer, 'Add task');
+      },
+    );
+
+    expect(persisted(onSubmit.mock.calls[0][0])).toMatchObject({
+      text: 'Career: practice facilitation',
+      notes: 'Finish when one exercise is done.',
+      estimatedMinutes: 25,
+      career: { goalId: 'goal-1' },
+    });
+  });
+});
+
+describe('AddTodoModal — career link', () => {
+  const careerOptions = {
+    goals: [
+      {
+        id: 'goal-1',
+        title: 'Grow into a lead',
+        milestones: [{ id: 'm-1', title: 'Run a retrospective' }],
+      },
+    ],
+    skills: [{ id: 'skill-1', name: 'Facilitation' }],
+  };
+
+  it('links a goal, a milestone and a skill', async () => {
+    const onSubmit = jest.fn<void, [TodoDraft]>();
+    await withRendered(element({ careerOptions, onSubmit }), async (renderer) => {
+      await type(renderer, 'Task title', 'Plan the retro');
+      await press(renderer, 'Choose career link');
+      await press(renderer, 'Career goal: Grow into a lead');
+      await press(renderer, 'Career milestone: Run a retrospective');
+      await press(renderer, 'Career skill: Facilitation');
+      await press(renderer, 'Add task');
+    });
+
+    expect(persisted(onSubmit.mock.calls[0][0]).career).toEqual({
+      goalId: 'goal-1',
+      milestoneId: 'm-1',
+      skillIds: ['skill-1'],
+    });
+  });
+
+  it('clears a previous link when the user asks for none', async () => {
+    const onSubmit = jest.fn<void, [TodoDraft]>();
+    await withRendered(element({ careerOptions, onSubmit }), async (renderer) => {
+      await type(renderer, 'Task title', 'Plan the retro');
+      await press(renderer, 'Choose career link');
+      await press(renderer, 'Career goal: Grow into a lead');
+      await press(renderer, 'Clear career link');
+      await press(renderer, 'Add task');
+    });
+
+    expect(persisted(onSubmit.mock.calls[0][0])).not.toHaveProperty('career');
+  });
+
+  it('prefills the task’s link when editing', async () => {
+    const task: Todo = {
+      id: 't1',
+      text: 'Plan the retro',
+      completed: false,
+      career: { goalId: 'goal-1', skillIds: ['skill-1'] },
+    };
+
+    await withRendered(element({ careerOptions, task }), async (renderer) => {
+      await press(renderer, 'Choose career link');
+      expect(byLabel(renderer, 'Career goal: Grow into a lead').props.accessibilityState).toEqual({
+        selected: true,
+      });
+      expect(byLabel(renderer, 'Career skill: Facilitation').props.accessibilityState).toEqual({
+        selected: true,
+      });
+    });
+  });
+
+  it('explains that there is nothing to link to instead of showing an empty picker', async () => {
+    await withRendered(element(), async (renderer) => {
+      await press(renderer, 'Choose career link');
+      expect(visibleText(renderer)).toContain('No career goals yet.');
+    });
+  });
+});
+
 describe('AddTodoModal — lifecycle', () => {
   it('does not draw the form when closed', async () => {
     // Otherwise the sheet's fields and placeholders sit in the tree from first

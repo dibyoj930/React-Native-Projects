@@ -12,7 +12,7 @@
 // module under test had already been evaluated.
 //
 // Asia/Kolkata is UTC+5:30 with no DST. A half-hour offset is deliberately the
-// hard case: the whole reason `productivity/dateKey.ts` avoids `toISOString()` is
+// hard case: the whole reason `shared/date.ts` avoids `toISOString()` is
 // that UTC conversion shifts the calendar day, and integer-hour zones cannot
 // expose a boundary error that a half-hour one makes obvious.
 process.env.TZ = 'Asia/Kolkata';

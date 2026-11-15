@@ -13,8 +13,8 @@ import type { Todo } from '../todos/model';
 import {
   filterByTag,
   groupTodos,
-  openCount,
   searchTodos,
+  taskListSummary,
 } from '../todos/taskSelectors';
 import { useTheme } from '../theme/useTheme';
 import type { Theme } from '../theme/theme';
@@ -116,22 +116,13 @@ export function AllTasksScreen({
 
   const sections = useMemo(() => groupTodos(filtered, today), [filtered, today]);
 
-  // Counted over what is shown, not the whole list: the subtitle describes the
-  // list under it.
-  const open = openCount(filtered);
-
-  const subtitle =
-    filtered.length === 0
-      ? 'Nothing yet'
-      : open === 0
-        ? `All ${filtered.length} done`
-        : `${open} open of ${filtered.length}`;
-
-  // Three empty states, because one message cannot be true in all three cases:
-  // the tag has no tasks, the filters matched nothing, or there is simply nothing
-  // yet. `hidden` puts no component in the list at all.
-  const emptyKind: 'none' | 'noMatches' | 'hidden' =
-    filtered.length > 0 ? 'hidden' : base.length === 0 ? 'none' : 'noMatches';
+  // What the header counts and what the list says when it is empty. Both are
+  // decided in `todos/taskSelectors` so the wording is testable without a
+  // renderer; the screen only prints it.
+  const summary = useMemo(
+    () => taskListSummary(filtered, base, filterTag),
+    [filtered, base, filterTag],
+  );
 
   return (
     <View style={styles.container}>
@@ -152,7 +143,7 @@ export function AllTasksScreen({
 
         <View style={styles.heading}>
           <Text style={styles.title}>{title ?? 'All tasks'}</Text>
-          <Text style={styles.subtitle}>{subtitle}</Text>
+          <Text style={styles.subtitle}>{summary.subtitle}</Text>
         </View>
 
         <TouchableOpacity
@@ -221,25 +212,12 @@ export function AllTasksScreen({
           filtered.length === 0 && styles.listContentEmpty,
         ]}
         ListEmptyComponent={
-          emptyKind === 'none' ? (
+          summary.emptyState && (
             <View style={styles.empty}>
-              <Text style={styles.emptyTitle}>
-                {filterTag ? 'No Todos yet' : 'No tasks yet'}
-              </Text>
-              <Text style={styles.emptyBody}>
-                {filterTag
-                  ? `Tap + to add the first ${filterTag} task — it is created already tagged.`
-                  : 'Anything you add shows up here, whether or not it has a date.'}
-              </Text>
+              <Text style={styles.emptyTitle}>{summary.emptyState.title}</Text>
+              <Text style={styles.emptyBody}>{summary.emptyState.body}</Text>
             </View>
-          ) : emptyKind === 'noMatches' ? (
-            <View style={styles.empty}>
-              <Text style={styles.emptyTitle}>No matches</Text>
-              <Text style={styles.emptyBody}>
-                Nothing here fits that search. Clear it to see every task again.
-              </Text>
-            </View>
-          ) : null
+          )
         }
       />
     </View>

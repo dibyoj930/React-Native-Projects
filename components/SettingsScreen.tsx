@@ -39,6 +39,8 @@ export type SettingsScreenProps = {
   onClearTasks: () => void;
   /** Confirmed elsewhere; this just reports the tap. */
   onClearProductivity: () => void;
+  /** Confirmed elsewhere; this just reports the tap. */
+  onClearCareer: () => void;
   onBack: () => void;
 };
 
@@ -95,6 +97,7 @@ export function SettingsScreen({
   taskCount,
   onClearTasks,
   onClearProductivity,
+  onClearCareer,
   onBack,
 }: SettingsScreenProps) {
   const t = useTheme();
@@ -191,10 +194,16 @@ export function SettingsScreen({
             detail="Removes focus sessions, streak and momentum. Keeps your tasks."
             onPress={onClearProductivity}
           />
+          <View style={styles.divider} />
+          <ActionButton
+            label="Clear career data"
+            detail="Removes your career profile, goals, skills, evidence and achievements. Keeps tasks and focus history."
+            onPress={onClearCareer}
+          />
         </View>
 
         <Text style={styles.about}>
-          Local-first: your tasks and focus history stay on this device.
+          Local-first: your tasks, focus history and career record stay on this device.
         </Text>
       </ScrollView>
     </View>

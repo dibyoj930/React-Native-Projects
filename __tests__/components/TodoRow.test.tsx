@@ -8,7 +8,8 @@
 
 import React from 'react';
 import { StyleSheet } from 'react-native';
-import { TodoRow, type TodoRowProps } from '../../components/TodoRow';
+import { TodoRow } from '../../components/TodoRow';
+import type { TodoRowProps } from '../../todos/rowViewModel';
 import type { Todo } from '../../todos/model';
 import { lightTheme } from '../../theme/theme';
 import { byLabel, hostNodes, labels, nodes, press, textContent, visibleText, withRendered } from '../support/render';
@@ -192,6 +193,49 @@ describe('TodoRow — the due date line', () => {
       expect(date).toBeDefined();
       expect(StyleSheet.flatten(date?.props.style).color).toBe(lightTheme.colors.textMuted);
     });
+  });
+});
+
+describe('TodoRow — the planned window', () => {
+  it('shows the approved plan window when one is given', async () => {
+    await withRendered(
+      <TodoRow {...props({ plannedLabel: '2:00 PM – 2:45 PM' })} />,
+      (renderer) => {
+        expect(visibleText(renderer)).toContain('2:00 PM – 2:45 PM');
+      },
+    );
+  });
+
+  it('shows nothing when the task has no approved plan', async () => {
+    await withRendered(<TodoRow {...props()} />, (renderer) => {
+      expect(visibleText(renderer)).not.toContain('PM');
+    });
+  });
+
+  it('hides the plan on a completed task, like the due date', async () => {
+    await withRendered(
+      <TodoRow
+        {...props({ todo: { ...TODO, completed: true }, plannedLabel: '2:00 PM – 2:45 PM' })}
+      />,
+      (renderer) => {
+        expect(visibleText(renderer)).not.toContain('2:00 PM – 2:45 PM');
+      },
+    );
+  });
+
+  it('draws the plan in the primary colour, distinct from the due date', async () => {
+    // A planned window is the app's suggestion; a due date is the user's
+    // deadline. Sharing a colour would hide which is which.
+    await withRendered(
+      <TodoRow {...props({ dueLabel: 'Tomorrow', plannedLabel: '2:00 PM – 2:45 PM' })} />,
+      (renderer) => {
+        const plan = hostNodes(renderer).find(
+          (node) => String(node.type) === 'Text' && node.children.includes('2:00 PM – 2:45 PM'),
+        );
+        expect(plan).toBeDefined();
+        expect(StyleSheet.flatten(plan?.props.style).color).toBe(lightTheme.colors.primary);
+      },
+    );
   });
 });
 

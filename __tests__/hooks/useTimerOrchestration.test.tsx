@@ -86,7 +86,7 @@ describe('useTimerOrchestration — starting', () => {
     await pick({ minutes: 25 });
 
     expect(api!.pickerVisible).toBe(false);
-    expect(deps.onStartFocus).toHaveBeenCalledWith('task-1');
+    expect(deps.onStartFocus).toHaveBeenCalledWith('task-1', expect.any(Number));
     expect(api!.hasTimer('task-1')).toBe(true);
     expect(api!.isRunning('task-1')).toBe(true);
     expect(api!.formatTimeForTodo('task-1')).toBe('00:25:00');
@@ -237,5 +237,35 @@ describe('useTimerOrchestration — restoring from the OS', () => {
 
     expect(api!.hasTimer('task-1')).toBe(false);
     expect(deps.onTimerExpired).not.toHaveBeenCalled();
+  });
+
+  it('waits for hydration before re-adopting, so an expiry closes a session in memory', async () => {
+    // The OS may hold a timer whose end has already passed. Re-adopting it fires
+    // an expiry that closes a session, and the persisted session only arrives
+    // once storage has loaded. The gate keeps the expiry from firing first.
+    getTriggerNotifications.mockResolvedValue([
+      pendingTimer('task-1', Date.now() + 60_000),
+    ]);
+
+    function GateProbe({ ready }: { ready: boolean }) {
+      api = useTimerOrchestration({ ...deps, restoreReady: ready });
+      return null;
+    }
+
+    let renderer: ReactTestRenderer.ReactTestRenderer | undefined;
+    await ReactTestRenderer.act(async () => {
+      renderer = ReactTestRenderer.create(<GateProbe ready={false} />);
+    });
+    await ReactTestRenderer.act(async () => undefined);
+    expect(getTriggerNotifications).not.toHaveBeenCalled();
+    expect(api!.hasTimer('task-1')).toBe(false);
+
+    await ReactTestRenderer.act(async () => {
+      renderer!.update(<GateProbe ready={true} />);
+    });
+    await ReactTestRenderer.act(async () => undefined);
+
+    expect(getTriggerNotifications).toHaveBeenCalledTimes(1);
+    expect(api!.hasTimer('task-1')).toBe(true);
   });
 });

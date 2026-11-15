@@ -10,7 +10,7 @@ import ReactTestRenderer from 'react-test-renderer';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { CUSTOM_TAGS_STORAGE_KEY } from '../../todos/tags';
-import { useCustomTags } from '../../todos/useCustomTags';
+import { useCustomTags } from '../../hooks/useCustomTags';
 import { render } from '../support/render';
 
 type Api = ReturnType<typeof useCustomTags>;

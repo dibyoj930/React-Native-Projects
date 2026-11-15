@@ -1,7 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+import { sanitizeCareerLink } from '../shared/careerLink';
 import { initialProductivityState, type ProductivityState } from './reducer';
-import type { FocusSession, MomentumMemory, StreakLedger } from './types';
+import type { ActiveSession, FocusSession, MomentumMemory, StreakLedger } from './types';
 
 /**
  * Persistence for the productivity layer.
@@ -19,11 +20,16 @@ const STORAGE_KEY = '@productivity/v1';
 
 type PersistedShape = {
   sessions: FocusSession[];
+  /** Open sessions, so an app kill mid-focus does not drop banked minutes. */
+  active: Record<string, ActiveSession>;
   ledger: StreakLedger;
   memory: MomentumMemory;
 };
 
-export type HydratedData = Pick<ProductivityState, 'sessions' | 'ledger' | 'memory'>;
+export type HydratedData = Pick<
+  ProductivityState,
+  'sessions' | 'active' | 'ledger' | 'memory'
+>;
 
 /**
  * Reads persisted data, falling back to a clean slate on anything unexpected.
@@ -35,6 +41,7 @@ export type HydratedData = Pick<ProductivityState, 'sessions' | 'ledger' | 'memo
 export async function loadProductivity(): Promise<HydratedData> {
   const empty: HydratedData = {
     sessions: [],
+    active: {},
     ledger: { ...initialProductivityState.ledger },
     memory: { ...initialProductivityState.memory },
   };
@@ -52,6 +59,7 @@ export async function loadProductivity(): Promise<HydratedData> {
     const candidate = parsed as Partial<PersistedShape>;
     return {
       sessions: sanitizeSessions(candidate.sessions),
+      active: sanitizeActive(candidate.active),
       ledger: sanitizeLedger(candidate.ledger),
       memory: sanitizeMemory(candidate.memory),
     };
@@ -62,13 +70,19 @@ export async function loadProductivity(): Promise<HydratedData> {
 }
 
 /**
- * Writes the persistable slice. Open sessions are intentionally dropped: an
- * in-flight focus session that the app killed did not happen, and recording it
- * would credit focus the user never actually completed.
+ * Writes the persistable slice, including any open session.
+ *
+ * Open sessions used to be dropped on the reasoning that a session the app
+ * killed never happened. That lost real minutes when the OS restored the timer
+ * after a relaunch: the task completed, the session was gone, and the focus it
+ * earned read as zero. The session is written now, and every credit is clamped
+ * to its timer end (`sessions.ts`), so a restore can bank what was focused and
+ * never more.
  */
 export async function saveProductivity(state: ProductivityState): Promise<void> {
   const payload: PersistedShape = {
     sessions: state.sessions,
+    active: state.active,
     ledger: state.ledger,
     memory: state.memory,
   };
@@ -131,6 +145,7 @@ function sanitizeSessions(value: unknown): FocusSession[] {
       continue;
     }
 
+    const career = sanitizeCareerLink(candidate.career);
     valid.push({
       id: candidate.id,
       taskId: typeof candidate.taskId === 'string' ? candidate.taskId : null,
@@ -138,7 +153,56 @@ function sanitizeSessions(value: unknown): FocusSession[] {
       endedAt: candidate.endedAt,
       focusedSeconds: candidate.focusedSeconds,
       status: candidate.status,
+      ...(career ? { career } : {}),
     });
+  }
+  return valid;
+}
+
+/**
+ * Keeps only open sessions that are shaped like one, keyed by task id.
+ *
+ * Same field-by-field repair as `sanitizeSessions`, because an active session is
+ * fed straight back into `focusedSecondsAt`. A `NaN` here would poison today's
+ * focus total rather than just look wrong.
+ */
+function sanitizeActive(value: unknown): Record<string, ActiveSession> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return {};
+
+  const valid: Record<string, ActiveSession> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry !== 'object' || entry === null) continue;
+    const candidate = entry as Partial<ActiveSession>;
+
+    if (typeof candidate.id !== 'string') continue;
+    if (typeof candidate.startedAt !== 'number' || !Number.isFinite(candidate.startedAt)) continue;
+    if (
+      typeof candidate.accumulatedSeconds !== 'number' ||
+      !Number.isFinite(candidate.accumulatedSeconds) ||
+      candidate.accumulatedSeconds < 0
+    ) {
+      continue;
+    }
+    if (
+      candidate.segmentStartedAt !== null &&
+      (typeof candidate.segmentStartedAt !== 'number' ||
+        !Number.isFinite(candidate.segmentStartedAt))
+    ) {
+      continue;
+    }
+
+    const career = sanitizeCareerLink(candidate.career);
+    valid[key] = {
+      id: candidate.id,
+      taskId: typeof candidate.taskId === 'string' ? candidate.taskId : null,
+      startedAt: candidate.startedAt,
+      accumulatedSeconds: candidate.accumulatedSeconds,
+      segmentStartedAt: candidate.segmentStartedAt,
+      ...(typeof candidate.expiresAt === 'number' && Number.isFinite(candidate.expiresAt)
+        ? { expiresAt: candidate.expiresAt }
+        : {}),
+      ...(career ? { career } : {}),
+    };
   }
   return valid;
 }

@@ -7,19 +7,36 @@
  * the container's business, and the screen would be failing at its own job if it
  * knew.
  *
- * Wrapped in `ProductivityProvider` because two of the cards it composes read
- * the productivity context themselves.
+ * The two cards it composes are the same kind of view, so their models arrive as
+ * props too — literal `today` and `history` models here, since nothing about
+ * them is what these tests are checking.
  */
-
 import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 
 import { HomeScreen, type HomeScreenProps } from '../../components/HomeScreen';
-import { DEFAULT_DAILY_GOALS } from '../../daily-goals';
-import { ProductivityProvider } from '../../productivity';
+import type { HistoryViewModel, NextTaskViewModel, TodayViewModel } from '../../hooks/useProductivityView';
 import type { Todo } from '../../todos/model';
 import { AVAILABLE_TAGS } from '../../todos/tags';
 import { byLabel, focusText, labels, press, submitText, textContent, typeText, visibleText, withRendered } from '../support/render';
+
+/** A Today tile model whose contents are not what these tests assert. */
+const today: TodayViewModel = {
+  momentumLabel: "🔥 You're in the flow",
+  focusLine: '30m / 45m',
+  tasksLine: '2 / 3',
+  focusRatio: 0.4,
+  tasksRatio: 0.5,
+  motivation: 'One step at a time. Keep going.',
+};
+
+/** A history model with no bars: its contents are covered by the panel's tests. */
+const history: HistoryViewModel = {
+  streak: { current: 0, longest: 0, freezesRemaining: 0 },
+  rangeLabel: '',
+  bars: [],
+  celebration: null,
+};
 
 function todo(overrides: Partial<Todo> & { id: string }): Todo {
   return {
@@ -41,19 +58,18 @@ function props(overrides: Partial<HomeScreenProps> = {}): HomeScreenProps {
     onAddTag: () => {},
     onAddTask: () => {},
     onOpenSettings: () => {},
-    goals: DEFAULT_DAILY_GOALS,
+    onOpenReplan: () => {},
+    replanAvailable: true,
+    today,
     onOpenGoals: () => {},
+    history,
     onExport: () => {},
     ...overrides,
   };
 }
 
 function screen(overrides: Partial<HomeScreenProps> = {}) {
-  return (
-    <ProductivityProvider>
-      <HomeScreen {...props(overrides)} />
-    </ProductivityProvider>
-  );
+  return <HomeScreen {...props(overrides)} />;
 }
 
 /**
@@ -253,6 +269,64 @@ describe('HomeScreen — the add-tag chip', () => {
     await withRendered(screen(), async (renderer) => {
       await typeText(renderer, 'Add a tag', 'Deep Work');
       expect(textContent(renderer)).toContain('#');
+    });
+  });
+});
+
+describe('HomeScreen — the replan entry', () => {
+  it('offers a way to replan the day when no timer is running', async () => {
+    await withRendered(screen(), (renderer) => {
+      expect(labels(renderer)).toContain('Replan my day');
+      expect(visibleText(renderer)).toContain('Replan my day');
+    });
+  });
+
+  it('reports the entry as a request for the replan screen', async () => {
+    const onOpenReplan = jest.fn();
+    await withRendered(screen({ onOpenReplan }), async (renderer) => {
+      await press(renderer, 'Replan my day');
+      expect(onOpenReplan).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it('omits the entry entirely while a focus timer is running', async () => {
+    // A greyed-out card with no explanation would read as a bug; the screen
+    // simply does not offer the destination mid-session.
+    await withRendered(screen({ replanAvailable: false }), (renderer) => {
+      expect(labels(renderer)).not.toContain('Replan my day');
+      expect(visibleText(renderer)).not.toContain('Replan my day');
+    });
+  });
+});
+
+describe('HomeScreen — the next-task card', () => {
+  const nextTask: NextTaskViewModel = {
+    state: 'task',
+    id: 'a',
+    title: 'Write the design doc',
+    reason: 'Due today',
+    plannedLabel: null,
+    isNow: false,
+    isRunning: false,
+    timerLabel: '00:00:00',
+  };
+
+  it('leads with the next task and wires Start focus to the task id', async () => {
+    const onStartFocus = jest.fn();
+    await withRendered(
+      screen({ todos: [todo({ id: 'a' })], nextTask, onStartFocus }),
+      async (renderer) => {
+        expect(visibleText(renderer)).toContain('Write the design doc');
+        expect(labels(renderer)).toContain('Start focus');
+        await press(renderer, 'Start focus');
+        expect(onStartFocus).toHaveBeenCalledWith('a');
+      },
+    );
+  });
+
+  it('omits the card when no model is supplied, rather than showing a dead button', async () => {
+    await withRendered(screen(), (renderer) => {
+      expect(labels(renderer)).not.toContain('Start focus');
     });
   });
 });

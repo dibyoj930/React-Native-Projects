@@ -14,6 +14,7 @@ import { Alert, type AlertButton } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useSettings } from '../../hooks/useSettings';
+import { CareerProvider } from '../../career';
 import { NotificationProvider } from '../../notifications';
 import { ProductivityProvider } from '../../productivity';
 import { ThemeProvider } from '../../theme/ThemeProvider';
@@ -34,7 +35,9 @@ function tree() {
     <ThemeProvider>
       <NotificationProvider>
         <ProductivityProvider>
-          <Probe />
+          <CareerProvider>
+            <Probe />
+          </CareerProvider>
         </ProductivityProvider>
       </NotificationProvider>
     </ThemeProvider>

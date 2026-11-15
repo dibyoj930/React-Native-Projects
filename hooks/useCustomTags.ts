@@ -7,7 +7,7 @@
  * Hues are not stored — `tags.ts` derives one from each label, so the only thing
  * that has to survive a restart is the label itself.
  *
- * Pattern note: same shape as `todos/useTasks` — plain state plus named
+ * Pattern note: same shape as `./useTasks` — plain state plus named
  * operations, no context. One component consumes it, so a provider would be a
  * second way to reach the same state.
  *
@@ -24,7 +24,7 @@ import {
   mergeTags,
   normalizeTagInput,
   type TagOption,
-} from './tags';
+} from '../todos/tags';
 
 export type CustomTags = {
   /** The labels the user has added, in the order they were added. */

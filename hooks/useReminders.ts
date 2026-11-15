@@ -19,6 +19,7 @@ import { useEffect } from 'react';
 import {
   cancelReminder,
   getPendingReminders,
+  isDailyOrStreakReminderId,
   planReminders,
   scheduleReminder,
   useNotifications,
@@ -49,6 +50,11 @@ export function useReminders(): void {
         const operations: Promise<void>[] = [];
 
         for (const held of pending) {
+          // Only this hook's own reminders. The reconcilers share one pending
+          // list, so without this guard a daily/streak pass would cancel the
+          // approved plan's start reminders (`plan-<taskId>`), which are not in
+          // `desired` and would otherwise look unwanted.
+          if (!isDailyOrStreakReminderId(held.id)) continue;
           const wanted = desiredById.get(held.id);
           // Cancel anything we no longer want, and any that moved: reusing the
           // id replaces the trigger, but a stale one under the same id would
