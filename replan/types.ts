@@ -18,6 +18,7 @@
  */
 
 import type { DayKey } from '../productivity/domain';
+import type { CareerLink } from '../shared/careerLink';
 import type { TimeKey } from '../todos/timeKey';
 
 /** Scheduling priority. Absent on a task normalises to `'low'` (see normalize.ts). */
@@ -212,6 +213,14 @@ export type PlannedTaskResult = {
   actualFocusSeconds?: number;
   status: PlannedTaskResultStatus;
   reason?: string;
+  /**
+   * The task's career link at the moment this comparison was built.
+   *
+   * Snapshotted so a later edit or deletion cannot rewrite the career meaning of
+   * a day that has already been reviewed. Absent means the task was not
+   * career-linked when the row was recorded.
+   */
+  career?: CareerLink;
 };
 
 export type PlanOutcome = {

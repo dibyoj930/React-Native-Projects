@@ -140,15 +140,22 @@ describe('a stored task reaches the list', () => {
 });
 
 describe('the list lives in exactly one place', () => {
-  it('does not render task rows on home', async () => {
+  it('shows only the next task on home, never a row from the list', async () => {
     // The whole point of the split. If a row ever comes back to home, there are two
     // copies of the same list again — and the completion lock and timer state that
     // make a row behave correctly would then have to be kept in step across both.
+    //
+    // One task's *title* is expected here now: the next-task card names it on
+    // purpose. What must not appear is a row's controls — a checkbox or a per-row
+    // focus button — because those are what make it a second copy of the list.
     await seedTodos([
       { id: 'a', text: 'Only on the tasks screen', completed: false, tags: [], createdAt: 1 },
     ]);
     const renderer = await mountApp();
-    expect(visibleText(renderer)).not.toContain('Only on the tasks screen');
+    expect(visibleText(renderer)).toContain('Only on the tasks screen');
+    expect(labels(renderer)).toContain('Start focus');
+    expect(labels(renderer)).not.toContain('Start focus on Only on the tasks screen');
+    expect(labels(renderer)).not.toContain('Complete Only on the tasks screen');
     // The doorway is there, though — home is how you get to the work.
     expect(visibleText(renderer)).toContain('See every task you have written down.');
     await unmount(renderer);
@@ -175,8 +182,12 @@ describe('the list lives in exactly one place', () => {
     expect(visibleText(renderer)).toContain('All tasks');
 
     await press(renderer, 'Back to today');
-    expect(visibleText(renderer)).not.toContain('Round trip');
+    // Home again. The task text is expected here now — the next-task card names
+    // it — so "we are not on the list screen" is the absence of the list's own
+    // back control, not the absence of the text.
     expect(visibleText(renderer)).toContain('Today');
+    expect(labels(renderer)).not.toContain('Back to today');
+    expect(visibleText(renderer)).toContain('Round trip');
     await unmount(renderer);
   });
 

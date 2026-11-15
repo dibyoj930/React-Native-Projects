@@ -1,3 +1,5 @@
+import { sanitizeCareerLink, type CareerLink } from '../shared/careerLink';
+
 import type { ActiveSession, FocusSession, FocusSessionStatus } from './types';
 
 /**
@@ -22,15 +24,35 @@ export function nextSessionId(now: number): string {
   return `s${now.toString(36)}-${sessionSequence.toString(36)}`;
 }
 
-/** Opens a running session. */
-export function startSession(id: string, taskId: string | null, now: number): ActiveSession {
+/** Opens a running session, optionally bound to a timer's end and career work. */
+export function startSession(
+  id: string,
+  taskId: string | null,
+  now: number,
+  expiresAt?: number,
+  career?: CareerLink,
+): ActiveSession {
+  const link = sanitizeCareerLink(career);
   return {
     id,
     taskId,
     startedAt: now,
     accumulatedSeconds: 0,
     segmentStartedAt: now,
+    ...(typeof expiresAt === 'number' ? { expiresAt } : {}),
+    ...(link ? { career: link } : {}),
   };
+}
+
+/**
+ * `now`, clamped to the session's timer end when it has one.
+ *
+ * This is the single place the expiry bound is applied, so pause, projection and
+ * close all agree. A session restored long after its timer ran out settles at the
+ * timer's end instead of at wall-clock now.
+ */
+function boundedNow(session: ActiveSession, now: number): number {
+  return session.expiresAt !== undefined ? Math.min(now, session.expiresAt) : now;
 }
 
 /**
@@ -41,7 +63,7 @@ export function startSession(id: string, taskId: string | null, now: number): Ac
 export function pauseSession(session: ActiveSession, now: number): ActiveSession {
   if (session.segmentStartedAt === null) return session;
 
-  const elapsed = Math.max(0, (now - session.segmentStartedAt) / 1000);
+  const elapsed = Math.max(0, (boundedNow(session, now) - session.segmentStartedAt) / 1000);
   return {
     ...session,
     accumulatedSeconds: session.accumulatedSeconds + elapsed,
@@ -63,7 +85,7 @@ export function resumeSession(session: ActiveSession, now: number): ActiveSessio
  */
 export function focusedSecondsAt(session: ActiveSession, now: number): number {
   if (session.segmentStartedAt === null) return session.accumulatedSeconds;
-  const elapsed = Math.max(0, (now - session.segmentStartedAt) / 1000);
+  const elapsed = Math.max(0, (boundedNow(session, now) - session.segmentStartedAt) / 1000);
   return session.accumulatedSeconds + elapsed;
 }
 
@@ -77,10 +99,12 @@ export function closeSession(
     id: session.id,
     taskId: session.taskId,
     startedAt: session.startedAt,
-    // Never earlier than the start, even under clock skew.
-    endedAt: Math.max(now, session.startedAt),
+    // Never earlier than the start, even under clock skew, and never later than
+    // the timer that opened it could have run.
+    endedAt: Math.max(boundedNow(session, now), session.startedAt),
     focusedSeconds: Math.max(0, Math.round(focusedSecondsAt(session, now))),
     status,
+    ...(session.career ? { career: session.career } : {}),
   };
 }
 

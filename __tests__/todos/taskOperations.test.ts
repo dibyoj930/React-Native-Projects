@@ -3,10 +3,15 @@
  *
  * The replan engine reads `priority`/`estimatedMinutes`/`schedulingMode`, so how
  * a draft writes them — and how an edit clears a stale fixed anchor — is part of
- * the contract, not incidental form plumbing.
+ * the contract, not incidental form plumbing. `withEstimatedMinutes` is the
+ * narrow write behind plan-review calibration.
  */
 
-import { applyDraftToTodo, createTodoFromDraft } from '../../todos/taskOperations';
+import {
+  applyDraftToTodo,
+  createTodoFromDraft,
+  withEstimatedMinutes,
+} from '../../todos/taskOperations';
 import type { Todo, TodoDraft } from '../../todos/model';
 
 function todo(overrides: Partial<Todo> = {}): Todo {
@@ -80,5 +85,77 @@ describe('createTodoFromDraft — scheduling fields', () => {
       estimatedMinutes: 20,
       schedulingMode: 'flexible',
     });
+  });
+});
+
+describe('task career links', () => {
+  it('writes a valid link onto a new task', () => {
+    const created = createTodoFromDraft(
+      draft({
+        text: 'Write case study',
+        career: { goalId: 'goal-1', milestoneId: 'm-1', skillIds: ['s-1'] },
+      }),
+      'id-1',
+      { now: () => 1234 },
+    );
+
+    expect(created.career).toEqual({
+      goalId: 'goal-1',
+      milestoneId: 'm-1',
+      skillIds: ['s-1'],
+    });
+  });
+
+  it('treats the draft as the whole selection, so omitting it clears the link', () => {
+    const updated = applyDraftToTodo(
+      todo({ career: { goalId: 'goal-1', skillIds: ['s-1'] } }),
+      draft(),
+    );
+
+    expect(updated.career).toBeUndefined();
+  });
+
+  it('does not let a malformed draft store a dangling reference', () => {
+    const updated = applyDraftToTodo(
+      todo(),
+      draft({ career: { milestoneId: 'm-1', skillIds: ['  ', 's-1'] } }),
+    );
+
+    expect(updated.career).toEqual({ skillIds: ['s-1'] });
+  });
+});
+
+describe('withEstimatedMinutes', () => {
+  it('rewrites only the target task’s estimate', () => {
+    const next = withEstimatedMinutes(
+      [todo({ id: 'a', estimatedMinutes: 10 }), todo({ id: 'b', estimatedMinutes: 20 })],
+      'a',
+      45,
+    );
+    expect(next[0].estimatedMinutes).toBe(45);
+    expect(next[1].estimatedMinutes).toBe(20);
+  });
+
+  it('changes nothing else about the task', () => {
+    const original = todo({
+      id: 'keep',
+      completed: true,
+      completedAt: 99,
+      createdAt: 7,
+      estimatedMinutes: 30,
+      tags: ['gym'],
+    });
+    const [updated] = withEstimatedMinutes([original], 'keep', 60);
+    expect(updated).toEqual({ ...original, estimatedMinutes: 60 });
+  });
+
+  it('clears the estimate when given a non-positive number', () => {
+    const [updated] = withEstimatedMinutes([todo({ estimatedMinutes: 30 })], 't1', 0);
+    expect(updated.estimatedMinutes).toBeUndefined();
+  });
+
+  it('leaves other tasks untouched', () => {
+    const other = todo({ id: 't2', estimatedMinutes: 45 });
+    expect(withEstimatedMinutes([other], 'missing', 10)).toEqual([other]);
   });
 });

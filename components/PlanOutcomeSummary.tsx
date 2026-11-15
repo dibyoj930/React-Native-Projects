@@ -8,9 +8,18 @@ import type { Theme } from '../theme/theme';
 export type PlanOutcomeSummaryProps = {
   outcome: PlanOutcome | null;
   title?: string;
+  /**
+   * The session log cannot speak for this day, so focus is unknown rather than
+   * zero. Rendered as such instead of printing a misleading `0 min`.
+   */
+  focusUnavailable?: boolean;
 };
 
-export function PlanOutcomeSummary({ outcome, title = "Plan vs actual" }: PlanOutcomeSummaryProps) {
+export function PlanOutcomeSummary({
+  outcome,
+  title = "Plan vs actual",
+  focusUnavailable = false,
+}: PlanOutcomeSummaryProps) {
   const t = useTheme();
   const styles = useMemo(() => createStyles(t), [t]);
   if (!outcome) return null;
@@ -40,8 +49,23 @@ export function PlanOutcomeSummary({ outcome, title = "Plan vs actual" }: PlanOu
           <Text style={styles.label}>Postponed</Text>
         </View>
       </View>
-      {(s.totalActualFocusMins !== undefined) && (
-        <Text style={styles.footer}>Focus: {s.totalActualFocusMins} min</Text>
+      {(focusUnavailable ||
+        s.totalActualFocusMins !== undefined ||
+        s.totalPlannedFocusMins !== undefined) && (
+        <Text style={styles.footer}>
+          {focusUnavailable
+            ? 'Focus: unavailable'
+            : [
+                s.totalActualFocusMins !== undefined
+                  ? `focused ${s.totalActualFocusMins} min`
+                  : null,
+                s.totalPlannedFocusMins !== undefined
+                  ? `planned ${s.totalPlannedFocusMins} min`
+                  : null,
+              ]
+                .filter(Boolean)
+                .join(' · ')}
+        </Text>
       )}
     </View>
   );

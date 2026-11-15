@@ -11,7 +11,7 @@ import type { ActiveSession, FocusSession, MomentumMemory, StreakLedger } from '
 export type ProductivityState = {
   /** Closed sessions, oldest first. */
   sessions: FocusSession[];
-  /** Open sessions, keyed by task id. In memory only — never persisted. */
+  /** Open sessions, keyed by task id. Persisted so focus survives a relaunch. */
   active: Record<string, ActiveSession>;
   ledger: StreakLedger;
   memory: MomentumMemory;
@@ -42,6 +42,7 @@ export type ProductivityAction =
   | {
       type: 'hydrated';
       sessions: FocusSession[];
+      active: Record<string, ActiveSession>;
       ledger: StreakLedger;
       memory: MomentumMemory;
     }
@@ -62,6 +63,7 @@ export function productivityReducer(
       return {
         ...state,
         sessions: action.sessions,
+        active: action.active,
         ledger: action.ledger,
         memory: action.memory,
         hydrated: true,

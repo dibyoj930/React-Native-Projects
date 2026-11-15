@@ -13,3 +13,4 @@ export * from './engine';
 export * from './planReminders';
 export * from './suggestions';
 export * from './planOutcome';
+export * from './rollover';

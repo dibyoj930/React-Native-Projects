@@ -8,6 +8,7 @@
  * of this file must not need a renderer.
  */
 
+import { sanitizeCareerLink, type CareerLink } from '../shared/careerLink';
 import { isValidDayKey, type DayKey } from '../shared/date';
 import { isValidTimeKey, type TimeKey } from './timeKey';
 
@@ -95,6 +96,18 @@ export type Todo = {
    * facts, and conflating them would make a deadline look movable.
    */
   fixedStartAt?: number;
+  /**
+   * Optional career work this task contributes to.
+   *
+   * The link is one-way on purpose: a task may point at a goal, milestone or
+   * skill, but a career record never points at a task. Deleting a task therefore
+   * cannot delete career history, and career progress is always derived from the
+   * tasks that currently point at it rather than stored as a second count.
+   *
+   * Absent means "not linked". A malformed or empty link is dropped by
+   * `migrateTodos`, never kept as a half-valid reference.
+   */
+  career?: CareerLink;
 };
 
 /**
@@ -131,6 +144,14 @@ export type TodoDraft = {
   estimatedMinutes?: number;
   /** Whether the engine may move the task. Absent clears back to flexible. */
   schedulingMode?: 'flexible' | 'fixed';
+  /**
+   * Career work this task contributes to, or absent for none.
+   *
+   * Form data like the rest of the draft: the sheet always returns its current
+   * selection, so an empty draft clears the previous link. The sheet prefills it
+   * from the task being edited, which makes that safe.
+   */
+  career?: CareerLink;
 };
 
 /**
@@ -149,6 +170,8 @@ export type TodoDraft = {
  *  - `notes` and `dueDate` did not exist. Left absent, which is the honest
  *    reading: an old task genuinely has neither, and inventing either would be
  *    worse than admitting it.
+ *  - `career` did not exist. Left absent for the same reason: an old task was
+ *    not linked to career work, and a guessed link would inflate practice.
  *
  * `dueDate` is shape-checked rather than trusted. Storage is user-writable, and
  * its consumers are string comparisons like `dueDate >= today`, which a
@@ -189,6 +212,7 @@ export function migrateTodos(parsed: readonly unknown[], now: number): Todo[] {
           ? legacy.schedulingMode
           : undefined,
       fixedStartAt: isFiniteNumber(legacy.fixedStartAt) ? legacy.fixedStartAt : undefined,
+      career: sanitizeCareerLink(legacy.career),
     };
   });
 }

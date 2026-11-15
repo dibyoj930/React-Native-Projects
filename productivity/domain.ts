@@ -79,6 +79,13 @@ export {
 } from './rollups';
 
 export {
+  focusedSecondsByTaskForDay,
+  focusedSecondsForDay,
+  hasSessionsForDay,
+  sessionsForDay,
+} from './planFocus';
+
+export {
   isMissionComplete,
   MAX_MISSION_LEVEL,
   MISSIONS_PER_LEVEL,

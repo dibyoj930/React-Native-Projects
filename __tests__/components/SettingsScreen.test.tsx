@@ -25,6 +25,7 @@ function props(overrides: Partial<SettingsScreenProps> = {}): SettingsScreenProp
     taskCount: 0,
     onClearTasks: () => {},
     onClearProductivity: () => {},
+    onClearCareer: () => {},
     onBack: () => {},
     ...overrides,
   };

@@ -61,6 +61,15 @@ export type TodoRowProps = {
    */
   plannedLabel?: string;
   /**
+   * The career work this task contributes to, already described for display
+   * (for example `Grow into team lead · Client discovery`).
+   *
+   * Absent when the task has no link, or when every id in its link has been
+   * deleted. The row never re-derives the label: resolving ids against the
+   * career document belongs to the controller that holds both sides.
+   */
+  careerLabel?: string;
+  /**
    * Whether that date is in the past. Only read when `dueLabel` is present.
    *
    * Passed in for the same reason as `dueLabel`: answering it needs today's day

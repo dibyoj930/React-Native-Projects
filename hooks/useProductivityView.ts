@@ -24,11 +24,15 @@ import {
   type FocusBarViewModel,
   formatDayRange,
   formatDuration,
+  formatDueLabel,
   type MomentumBand,
   MOMENTUM_BAND_LABELS,
   type StreakResult,
   useProductivity,
 } from '../productivity';
+import { formatClock } from '../replan/explain';
+import type { NextTaskSelection } from '../todos/nextTask';
+import type { Todo } from '../todos/model';
 
 /** Everything the Today tile prints. Nothing here is derived in the view. */
 export type TodayViewModel = {
@@ -107,6 +111,69 @@ export function buildTodayViewModel(input: {
 }
 
 /**
+ * The next-task card's readout: which task, why, and whether it is in flight.
+ *
+ * A discriminated model rather than nullable fields, because "no task" has two
+ * genuinely different meanings the copy must not blur: an empty list invites a
+ * first task, while an all-done list congratulates. Collapsing them would make
+ * one of the two states lie.
+ */
+export type NextTaskViewModel =
+  | {
+      state: 'task';
+      id: string;
+      title: string;
+      /** Short reason chip: `Overdue`, `Due today`, a due label, or `No date`. */
+      reason: string;
+      /** `9:00 AM – 9:25 AM` for an approved window, or null. */
+      plannedLabel: string | null;
+      /** True when the approved window is happening right now. */
+      isNow: boolean;
+      /** True while this task's focus timer is running. */
+      isRunning: boolean;
+      /** The countdown readout while running, else an empty string. */
+      timerLabel: string;
+    }
+  | { state: 'allComplete'; total: number }
+  | { state: 'empty' };
+
+/** The due-based reason chip, matching how the task list groups the same task. */
+function dueReason(todo: Todo, today: string): string {
+  if (todo.dueDate && todo.dueDate < today) return 'Overdue';
+  if (todo.dueDate === today) return 'Due today';
+  if (todo.dueDate) return formatDueLabel(todo.dueDate, today);
+  return 'No date';
+}
+
+export function buildNextTaskViewModel(input: {
+  selection: NextTaskSelection | null;
+  todos: readonly Todo[];
+  today: string;
+  /** Live timer state for the chosen task, supplied by the controller. */
+  timer?: { running: boolean; label: string };
+}): NextTaskViewModel {
+  if (!input.selection) {
+    return input.todos.length === 0
+      ? { state: 'empty' }
+      : { state: 'allComplete', total: input.todos.length };
+  }
+
+  const { todo, window } = input.selection;
+  return {
+    state: 'task',
+    id: todo.id,
+    title: todo.text,
+    reason: dueReason(todo, input.today),
+    plannedLabel: window
+      ? `${formatClock(window.start)} – ${formatClock(window.end)}`
+      : null,
+    isNow: input.selection.isNow,
+    isRunning: input.timer?.running ?? false,
+    timerLabel: input.timer?.label ?? '',
+  };
+}
+
+/**
  * The history panel's readout from the streak and the recent days.
  *
  * `recentDays` is newest-first (the snapshot's contract); `buildFocusChart`
@@ -153,7 +220,7 @@ export function buildHistoryViewModel(input: {
  * saved goals.
  */
 export function useProductivityView(goals: DailyGoals) {
-  const { snapshot } = useProductivity();
+  const { snapshot, hydrated } = useProductivity();
 
   const today = useMemo(
     () =>
@@ -179,5 +246,7 @@ export function useProductivityView(goals: DailyGoals) {
     history,
     todayRollup: snapshot.todayRollup,
     attribution: snapshot.attribution,
+    /** The focus log has loaded; gates writes built from the snapshot. */
+    hydrated,
   };
 }

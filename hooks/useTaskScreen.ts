@@ -23,6 +23,7 @@ import { Alert, Share } from 'react-native';
 
 import { cancelTimerNotification, useNotifications } from '../notifications';
 import { formatDueLabel, todayKey, useProductivity } from '../productivity';
+import type { FocusSession } from '../productivity';
 import { triggerHaptic } from '../haptics';
 import type { TodoRowProps } from '../todos/rowViewModel';
 import type { Todo, TodoDraft } from '../todos/model';
@@ -68,6 +69,13 @@ export type TaskScreen = {
   notificationsBlocked: boolean;
   /** The task the edit sheet is open for, or null in create mode. */
   editingTodo: Todo | null;
+  /**
+   * A draft the create sheet was opened with, if any.
+   *
+   * Used by career recommendations to prefill a real task without writing one
+   * automatically. Editing always takes precedence, and every close clears it.
+   */
+  draftPrefill: TodoDraft | null;
   /** Whether the add/edit sheet is visible. */
   showTaskSheet: boolean;
   /** Whether the duration picker is visible. */
@@ -76,8 +84,15 @@ export type TaskScreen = {
   setPickerVisible: (visible: boolean) => void;
   handleTimerConfirm: (picked: TimerState) => void;
   handleTimerCancel: () => void;
-  /** Opens the create sheet. */
-  openCreate: () => void;
+  /**
+   * Opens the duration picker for one task.
+   *
+   * The same entry point a task row's focus control uses, exposed so the home
+   * screen's next-task card can start focus without a second timer flow.
+   */
+  startFocusFor: (id: string) => void;
+  /** Opens the create sheet, optionally prefilled with a draft. */
+  openCreate: (draft?: TodoDraft) => void;
   /** Opens the edit sheet for one task, so a `needsInformation` task can be given a length. */
   openEdit: (id: string) => void;
   /** Closes the add/edit sheet without saving. */
@@ -90,10 +105,26 @@ export type TaskScreen = {
   rowPropsFor: (todo: Todo) => TodoRowProps;
   /** Empties the list, settling every task's timer and session first. */
   clearAllTasks: () => void;
+  /**
+   * Rewrites one task's estimate, and nothing else.
+   *
+   * The narrow, explicit write behind plan-review calibration: a suggested
+   * adjustment is applied only when the user taps it, and it may only change the
+   * estimate.
+   */
+  setEstimatedMinutes: (id: string, minutes: number) => void;
   /** The shipped tag vocabulary plus the user's own, deduplicated. */
   tags: TagOption[];
   /** Adds whatever was typed as a tag, if it normalises to a new label. */
   addTag: (raw: string) => void;
+  /**
+   * The closed focus-session log.
+   *
+   * Passed through so the Plan Review controller can recompute per-day focus
+   * without a second storage read that could disagree with what this layer
+   * already holds.
+   */
+  focusSessions: readonly FocusSession[];
 };
 
 export function useTaskScreen(): TaskScreen {
@@ -109,6 +140,7 @@ export function useTaskScreen(): TaskScreen {
     clearTasks,
     completeTodos,
     setCompleted,
+    setEstimatedMinutes,
   } = useTasks();
   // The tag vocabulary the user has grown, alongside the shipped one. Its own
   // key and its own persistence: clearing tasks must not clear tags.
@@ -132,6 +164,9 @@ export function useTaskScreen(): TaskScreen {
   // navigation library — there is no router in this app, and one sheet is not a
   // reason to add one.
   const [showTaskSheet, setShowTaskSheet] = useState(false);
+  // A caller may supply the starting values for a new task. This is how a career
+  // recommendation becomes an ordinary task without a second creation path.
+  const [draftPrefill, setDraftPrefill] = useState<TodoDraft | null>(null);
 
   // Today's day key, once per render and shared by every row. It cannot differ
   // between rows, and `localDateKey` builds a `Date` to do it, so computing it
@@ -140,7 +175,9 @@ export function useTaskScreen(): TaskScreen {
 
   const {
     snapshot,
+    sessions: focusSessions,
     setTasks,
+    hydrated: productivityHydrated,
     startFocus,
     pauseFocus,
     resumeFocus,
@@ -155,6 +192,21 @@ export function useTaskScreen(): TaskScreen {
   useEffect(() => {
     setTasks(todos);
   }, [todos, setTasks]);
+
+  /**
+   * Starts a session with the task's current career link attached.
+   *
+   * The productivity layer deliberately does not know the task list, so this
+   * controller passes the link across once, at session start. The session keeps
+   * its own snapshot from then on: editing or deleting the task cannot rewrite
+   * focus that has already been spent.
+   */
+  const startFocusedTask = useCallback(
+    (taskId: string, endsAt: number) => {
+      startFocus(taskId, endsAt, findTodo(todos, taskId)?.career);
+    },
+    [startFocus, todos],
+  );
 
   /**
    * True when a timer on this task ran all the way to zero.
@@ -211,12 +263,15 @@ export function useTaskScreen(): TaskScreen {
     formatTimeForTodo,
   } = useTimerOrchestration({
     onTimerExpired: handleTimerExpired,
-    onStartFocus: startFocus,
+    onStartFocus: startFocusedTask,
     onPauseFocus: pauseFocus,
     onResumeFocus: resumeFocus,
     // A deliberate stop and a natural expiry are both "the session is over";
     // only the *status* differs, which is the argument the hook passes through.
     onStopFocus: finishFocus,
+    // Re-adopt OS-held timers only once both stores have loaded, so an expiry
+    // that fires at once closes the session it belongs to rather than none.
+    restoreReady: hydrated && productivityHydrated,
   });
 
   /**
@@ -328,14 +383,16 @@ export function useTaskScreen(): TaskScreen {
    */
   const editingTodo = editingId ? findTodo(todos, editingId) ?? null : null;
 
-  /** Create mode: no task, so the sheet starts empty. */
-  const openCreate = useCallback(() => {
+  /** Create mode: no task, so the sheet starts empty unless a draft is supplied. */
+  const openCreate = useCallback((draft?: TodoDraft) => {
     setEditingId(null);
+    setDraftPrefill(draft ?? null);
     setShowTaskSheet(true);
   }, []);
 
   const openEdit = useCallback((id: string) => {
     setEditingId(id);
+    setDraftPrefill(null);
     setShowTaskSheet(true);
   }, []);
 
@@ -344,6 +401,7 @@ export function useTaskScreen(): TaskScreen {
     // of the sheet save over a task the user is not looking at.
     setShowTaskSheet(false);
     setEditingId(null);
+    setDraftPrefill(null);
   }, []);
 
   /**
@@ -463,11 +521,13 @@ export function useTaskScreen(): TaskScreen {
     timerWindowFor,
     notificationsBlocked: permission === 'denied',
     editingTodo,
+    draftPrefill,
     showTaskSheet,
     pickerVisible,
     setPickerVisible,
     handleTimerConfirm,
     handleTimerCancel,
+    startFocusFor: openTimerPicker,
     openCreate,
     openEdit,
     closeTaskSheet,
@@ -475,7 +535,9 @@ export function useTaskScreen(): TaskScreen {
     exportTodos,
     rowPropsFor,
     clearAllTasks,
+    setEstimatedMinutes,
     tags,
     addTag,
+    focusSessions,
   };
 }

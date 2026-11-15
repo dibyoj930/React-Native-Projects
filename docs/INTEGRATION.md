@@ -77,7 +77,7 @@ app is testable without a binary.
 | Native module | Sole boundary | Notes |
 | --- | --- | --- |
 | `@notifee/react-native` | `notifications/notificationService.ts` | Scheduled triggers, permission, initial notification, foreground events |
-| `@react-native-async-storage/async-storage` | `todos/taskRepository.ts`, `productivity/storage.ts`, `theme/ThemeProvider.tsx`, `hooks/useCustomTags.ts`, `daily-goals/goalsStorage.ts`, `replan/planStorage.ts` | Six independent keys (§4) |
+| `@react-native-async-storage/async-storage` | `todos/taskRepository.ts`, `productivity/storage.ts`, `theme/ThemeProvider.tsx`, `hooks/useCustomTags.ts`, `daily-goals/goalsStorage.ts`, `replan/planStorage.ts`, `replan/planOutcomeStorage.ts`, `reflections/storage.ts`, `career/storage.ts` | Nine independent keys (§4) |
 | `@react-native-community/datetimepicker` | `components/AddTodoModal.tsx` | `mode="date"` and `mode="time"` |
 | `react-native-timer-picker` | `WelcomeComponent.tsx` | Focus-duration picker |
 | `react-native-gesture-handler` | `App.tsx`, `components/SwipeableTodoRow.tsx` | Gesture root + swipe actions |
@@ -102,6 +102,9 @@ one never touches another.
 | `hooks/useCustomTags.ts` | `customTags` (`CUSTOM_TAGS_STORAGE_KEY`) | `addTag` |
 | `daily-goals/goalsStorage.ts` | `@daily-goals/v1` | `saveDailyGoals` |
 | `replan/planStorage.ts` | `@replan/v1` | `saveReplanDoc` / `savePlan` (one `setItem` per apply) |
+| `replan/planOutcomeStorage.ts` | `@replan-outcomes/v1` | sanitised plan-vs-actual history |
+| `reflections/storage.ts` | `@reflections/v1` | reflection entries |
+| `career/storage.ts` | `@career/v1` | debounced `saveCareerDoc`; one serialized mutation queue |
 
 Every read is defensive: a missing key, non-array/non-object JSON, or a read
 failure returns empty/default state and logs, rather than throwing. A broken
@@ -124,16 +127,41 @@ app is not foregrounded.
 
 ## 4. Storage contract
 
-Six independent AsyncStorage keys. Clearing one never touches another.
+Nine independent AsyncStorage keys. Clearing one never touches another.
 
 | Key | Owner | Shape | Repair on load |
 | --- | --- | --- | --- |
 | `todos` (`TODOS_STORAGE_KEY`) | `todos/taskRepository.ts` | `Todo[]` | `migrateTodos` |
-| `@productivity/v1` | `productivity/storage.ts` | `{ sessions, ledger, memory }` | per-field sanitising |
+| `@productivity/v1` | `productivity/storage.ts` | `{ sessions, active, ledger, memory }` | per-field sanitising |
 | `@theme/preference` | `theme/ThemeProvider.tsx` | `'system' \| 'light' \| 'dark'` | falls back to `system` |
 | `customTags` (`CUSTOM_TAGS_STORAGE_KEY`) | `hooks/useCustomTags.ts` | `string[]` | normalised, deduplicated, stripped |
 | `@daily-goals/v1` | `daily-goals/goalsStorage.ts` | `{ focusMinutes, tasksCompleted }` | field-by-field via `sanitizeGoals` |
 | `@replan/v1` | `replan/planStorage.ts` | `{ version, preferences, plan }` | `sanitizeReplanDoc` |
+| `@replan-outcomes/v1` | `replan/planOutcomeStorage.ts` | outcome history | sanitised records |
+| `@reflections/v1` | `reflections/storage.ts` | reflection entries | sanitised records |
+| `@career/v1` | `career/storage.ts` | `CareerDoc` (v2) | `migrateCareerDoc` then `sanitizeCareerDoc` |
+
+### `@career/v1`
+
+One key holds the whole career document so a mutation that touches several
+collections (for example hard-deleting a goal while unlinking its evidence) is
+one atomic `setItem`. Reads never throw: a missing or malformed value seeds the
+suggested development areas.
+
+The document carries its own `version`. On load, `migrateCareerDoc` upgrades v1
+shapes before `sanitizeCareerDoc` repairs fields:
+
+| v1 shape | v2 shape |
+| --- | --- |
+| `profile.currentRole` | `profile.designation` |
+| `profile.targetRole` | first entry of `profile.desiredRoles` |
+| `goal.category` | `goal.goalType` (explicit mapping; unknown → `custom`) |
+| `goal.customCategory` | `goal.customGoalType` |
+| `skill.importance` | seeds both `roleImportance` and `futureImportance` |
+
+A migration never invents a date, profession, score or progress value. The
+sanitizer then drops records without the minimum identity (a goal without an id
+or title, evidence without a title or valid day) and repairs everything else.
 
 ### `todos`
 
@@ -154,6 +182,7 @@ A JSON array of `Todo`, written whole on every change (after hydration).
 | `estimatedMinutes` | positive whole number | field dropped |
 | `schedulingMode` | `fixed \| flexible` | field dropped |
 | `fixedStartAt` | finite number (epoch ms) | field dropped |
+| `career` | optional `CareerLink` (`goalId`, `milestoneId`, `skillIds`) | malformed fields dropped; empty link removed |
 
 A malformed field costs the field, never the whole task. Legacy/unknown fields
 are ignored. `priority` is deliberately left absent for legacy tasks rather than
@@ -168,12 +197,33 @@ keys so an accidental addition fails.
 
 ### `@productivity/v1`
 
-`{ sessions: FocusSession[], ledger: StreakLedger, memory: MomentumMemory }`.
-Open/active sessions are **never** persisted. `loadProductivity` sanitises every
-field independently; corrupt values degrade to safe defaults. `@daily-goals/v1`
-lives under its own key and is repaired by `sanitizeGoals` on load (Settings →
-Clear focus history does not touch it). Writes are debounced
+`{ sessions: FocusSession[], active: Record<string, ActiveSession>, ledger: StreakLedger, memory: MomentumMemory }`.
+Open/active sessions are persisted so focus survives a relaunch, and they are
+sanitised on load like closed sessions. `loadProductivity` sanitises every field
+independently; corrupt values degrade to safe defaults. `@daily-goals/v1` lives
+under its own key and is repaired by `sanitizeGoals` on load (Settings → Clear
+focus history does not touch it). Writes are debounced
 (`SAVE_DEBOUNCE_MS = 800`) for productivity.
+
+Both `FocusSession` and `ActiveSession` may carry an optional `career` snapshot
+(`goalId`, `milestoneId`, `skillIds`). It is copied from the task when focus
+starts, sanitised on write and on load, and never re-read from the task list. A
+task edited or deleted later therefore cannot change focus already recorded.
+
+#### Task ↔ career linkage
+
+- `Todo.career` is the only stored link. Career records never store a task id.
+- Starting focus copies the link onto the session. Pausing, resuming and closing
+  preserve it; sessions recorded before the link existed are not backfilled.
+- `career/linkage.ts` resolves ids against the current career document. Deleted
+  goals, milestones and skills stop resolving; valid parts of a link survive
+  independently.
+- Practice is derived, not stored: linked task counts, completion counts,
+  attributed focus time and the latest practice day. No percentage or readiness
+  figure is produced from these counts.
+- `hooks/useCareerDevelopment` is the only place that holds task, focus and
+  career state together. It memoises the derivation and supplies the task sheet's
+  picker options; `CareerProvider` remains task-independent.
 
 ### `@theme/preference`
 
@@ -393,6 +443,7 @@ Layer → suite mapping:
 | Pure productivity | `__tests__/productivity/*` |
 | Pure tasks | `__tests__/todos/{taskRules,taskSelectors,timeKey,taskReminders,migration,taskRepository,taskOperations}` |
 | Pure replan | `__tests__/replan/*` (engine, interval, rank, preferences, explain, normalize, validate, planReminders, planStorage) |
+| Pure career | `__tests__/career/{domain,linkage,migration,storage}` |
 | Notifee boundary | `__tests__/notifications/{notificationService,reminderPlan}` |
 | Controllers | `__tests__/hooks/*` (probe components call the hook) |
 | Components | `__tests__/components/*` |

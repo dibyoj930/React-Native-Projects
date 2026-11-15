@@ -7,6 +7,8 @@
  * no fake timers, no simulator.
  */
 
+import type { CareerLink } from '../shared/careerLink';
+
 /** `YYYY-MM-DD` in the device's *local* calendar. See `shared/date.ts`. */
 export type { DayKey } from '../shared/date';
 
@@ -50,12 +52,26 @@ export type FocusSession = {
   /** Seconds actually spent focusing. Excludes every paused interval. */
   focusedSeconds: number;
   status: FocusSessionStatus;
+  /**
+   * Career work the focused task was linked to when the session started.
+   *
+   * A snapshot, not a live join: the task may be edited or deleted while the
+   * focus log remains. Keeping the link here is what lets career practice count
+   * focus the user genuinely spent even after the task is gone, without a career
+   * record ever pointing back at a task.
+   */
+  career?: CareerLink;
 };
 
 /**
- * A session that is still open. Held in memory only — an app kill discards it,
- * which is the honest outcome: there is no partial credit for focus that was
- * never closed out.
+ * A session that is still open.
+ *
+ * Persisted alongside the closed log so an app kill during a focus block does
+ * not silently drop the minutes it banked: the session is re-adopted on the next
+ * launch and closed by whichever timer event finishes it. To keep that safe,
+ * `expiresAt` records the end of the timer that opened it, and every credit
+ * calculation is clamped to it — a session restored days later can never claim
+ * more focus than the timer it belonged to could have run for.
  */
 export type ActiveSession = {
   id: string;
@@ -65,6 +81,16 @@ export type ActiveSession = {
   accumulatedSeconds: number;
   /** Start of the current run segment, or null while paused. */
   segmentStartedAt: number | null;
+  /**
+   * Epoch ms the timer was scheduled to end, when known.
+   *
+   * Bounds credited focus so a session that outlives its timer cannot accrue
+   * wall-clock time. Absent for a session with no timer (legacy data), in which
+   * case credit is unbounded as it always was.
+   */
+  expiresAt?: number;
+  /** The task's career link at the moment this session started, if any. */
+  career?: CareerLink;
 };
 
 /**

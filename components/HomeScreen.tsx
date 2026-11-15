@@ -6,11 +6,15 @@
  * how the app arrives at any of those states. No task rules, no navigation
  * state, no storage: the counts it prints come from the list it is handed.
  *
- * The two cards it composes (`TodayCard`, `ProductivityDashboard`) are the same
- * kind of view: they render the models this screen passes down (the
- * productivity controller in `hooks/useProductivityView` builds them), so
- * nothing on the home screen reads a context or derives a productivity fact of
- * its own — everything it displays arrives as a prop.
+ * The cards it composes (`NextTaskCard`, `TodayCard`, `ProductivityDashboard`)
+ * are the same kind of view: they render the models this screen passes down (the
+ * productivity controller in `hooks/useProductivityView` and the composition
+ * point build them), so nothing on the home screen reads a context or derives a
+ * productivity fact of its own — everything it displays arrives as a prop.
+ *
+ * The order is the product decision: the next task leads because "what should I
+ * do next?" is what someone opening the app is usually asking; the progress
+ * summary and the destinations follow.
  */
 import React, { useCallback, useMemo, useState } from 'react';
 import {
@@ -26,7 +30,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ProductivityDashboard } from './ProductivityDashboard';
 import { TodayCard } from './TodayCard';
-import type { HistoryViewModel, TodayViewModel } from '../hooks/useProductivityView';
+import { NextTaskCard } from './NextTaskCard';
+import type {
+  HistoryViewModel,
+  NextTaskViewModel,
+  TodayViewModel,
+} from '../hooks/useProductivityView';
 import type { Todo } from '../todos/model';
 import { accentFor, normalizeTagInput, tintOf, type TagOption } from '../todos/tags';
 import { openCount } from '../todos/taskSelectors';
@@ -39,6 +48,7 @@ import { ReflectionPromptBanner } from './ReflectionPromptBanner';
 import { ReflectionModal } from './ReflectionModal';
 import { DevPreviewBar } from './DevPreviewBar';
 import type { PlanOutcome, ReplanSuggestion } from '../replan';
+import type { CareerHomeSummary } from '../career';
 import type { ReflectionEntry } from '../reflections';
 
 /**
@@ -90,10 +100,39 @@ export type HomeScreenProps = {
    * as a bug.
    */
   replanAvailable: boolean;
+  /**
+   * Opens the Plan Review screen.
+   *
+   * Optional so the screen can be rendered without a review destination (the
+   * component tests do exactly that); the tile is omitted when it is absent.
+   */
+  onOpenPlanReview?: () => void;
   /** The Today tile's readout, prepared by the productivity controller. */
   today: TodayViewModel;
+  /**
+   * The next-task card's readout, prepared by the composition point.
+   *
+   * Optional so the screen can render without the card (the component tests do
+   * exactly that); the card is omitted entirely when absent.
+   */
+  nextTask?: NextTaskViewModel | null;
+  /**
+   * Opens the duration picker for a task — the existing Start Focus flow.
+   *
+   * Required by the next-task card; when absent, the card is omitted rather than
+   * rendered with a dead button.
+   */
+  onStartFocus?: (id: string) => void;
   /** Opens the Goals & Preferences screen. */
   onOpenGoals: () => void;
+  /**
+   * The career entry's summary, derived by the composition point.
+   *
+   * Optional, like the Plan Review entry: the component tests render HomeScreen
+   * without a career destination and the card is omitted rather than shown dead.
+   */
+  career?: CareerHomeSummary;
+  onOpenCareer?: () => void;
   /** The history panel's readout, prepared by the productivity controller. */
   history: HistoryViewModel;
   /** Shares the list as JSON. No-op when there is nothing to export. */
@@ -124,9 +163,14 @@ export function HomeScreen({
   onAddTask,
   onOpenSettings,
   onOpenReplan,
+  onOpenPlanReview,
   replanAvailable,
   today,
+  nextTask,
+  onStartFocus,
   onOpenGoals,
+  career,
+  onOpenCareer,
   history,
   onExport,
   suggestions = [],
@@ -142,6 +186,10 @@ export function HomeScreen({
   onCloseReflection,
 }: HomeScreenProps) {
   const insets = useSafeAreaInsets();
+  const footerStyle = {
+    paddingBottom: Math.max(insets.bottom, 12),
+    marginBottom: insets.bottom > 0 ? 0 : 4,
+  };
   const t = useTheme();
   // What has been typed into the add-tag field, before Enter commits it.
   const [draftTag, setDraftTag] = useState('');
@@ -211,13 +259,38 @@ export function HomeScreen({
           </View>
         )}
 
-        {/* The way to the work. It sits above the progress card rather than below
-            it because a person opening this app is usually asking "what now?",
-            and this is the answer to that question.
+        {/* What to do next leads, because that is the question someone opening
+            this app is usually asking. Everything below answers "how is it
+            going?" or "where else can I go?" — useful, but not first. */}
+        {nextTask && onStartFocus && (
+          <NextTaskCard
+            model={nextTask}
+            onAddTask={onAddTask}
+            onOpenTasks={onOpenTasks}
+            onStartFocus={onStartFocus}
+          />
+        )}
 
-            The `+` sits beside it rather than in the header, because it belongs to
-            this pair: add a task, then see your tasks. Both parts are the way into
-            the list, so they share a row. */}
+        {/* Compact daily progress: the momentum sentence and the two goals,
+            directly under the next task so "how is today going?" is answered
+            without scrolling. The whole tile opens the Goals screen. */}
+        <TodayCard model={today} onOpenGoals={onOpenGoals} />
+
+        {suggestions.length > 0 && replanAvailable && (
+          <SuggestionBanner
+            suggestion={suggestions[0]}
+            onAction={() => {
+              setActiveSuggestion(suggestions[0]);
+              setSheetVisible(true);
+            }}
+            onDismiss={() => onDismissSuggestion?.(suggestions[0].id)}
+            onRemindLater={() => onRemindLaterSuggestion?.(suggestions[0].id)}
+          />
+
+        )}
+
+        {/* The plan overview: how much of the list is still open, and the way to
+            add to it. Compact — a count and two destinations, no schedule. */}
         <View style={styles.tileRow}>
           <TouchableOpacity
             accessibilityLabel="Open all tasks"
@@ -258,27 +331,9 @@ export function HomeScreen({
           </TouchableOpacity>
         </View>
 
-        {suggestions.length > 0 && replanAvailable && (
-          <SuggestionBanner
-            suggestion={suggestions[0]}
-            onAction={() => {
-              setActiveSuggestion(suggestions[0]);
-              setSheetVisible(true);
-            }}
-            onDismiss={() => onDismissSuggestion?.(suggestions[0].id)}
-            onRemindLater={() => onRemindLaterSuggestion?.(suggestions[0].id)}
-          />
-
-        )}
-        {__DEV__ && SHOW_DEV_PREVIEW && <DevPreviewBar />}
-        {todayOutcome && <PlanOutcomeSummary outcome={todayOutcome} title="Today: plan vs actual" />}
-        {yesterdayOutcome && <PlanOutcomeSummary outcome={yesterdayOutcome} title="Yesterday: plan vs actual" />}
-        {showReflectionPrompt && (
-          <ReflectionPromptBanner onOpen={() => onOpenReflection?.()} onDismiss={() => onDismissReflection?.()} />
-        )}
-        {/* The way to a plan for the day. Distinct from the task list beside it:
-            the list is everything written down, this is what to do with today.
-            Omitted while a focus timer runs — see `replanAvailable`. */}
+        {/* Demoted below the daily essentials: real destinations, but secondary
+            to what is in front of the user right now. Omitted while a focus
+            timer runs — see `replanAvailable`. */}
         {replanAvailable && (
           <TouchableOpacity
             accessibilityLabel="Replan my day"
@@ -309,18 +364,79 @@ export function HomeScreen({
           </TouchableOpacity>
         )}
 
-        {/* Replaced a "3 of 7 tasks done" row, which counted every task ever
-            added — including ones completed weeks ago — and so answered a
-            question nobody was asking. The whole tile opens the Goals &
-            Preferences screen where its targets are edited. */}
-        <TodayCard model={today} onOpenGoals={onOpenGoals} />
+        {/* The way to the last week's plan-vs-actual detail. Omitted entirely
+            when no handler is supplied, rather than shown as a dead card. */}
+        {onOpenPlanReview && (
+          <TouchableOpacity
+            accessibilityLabel="Open plan review"
+            accessibilityRole="button"
+            onPress={onOpenPlanReview}
+            style={styles.replanTile}
+          >
+            <View style={styles.replanIcon}>
+              <MaterialCommunityIcons
+                color={t.colors.primary}
+                name="chart-timeline-variant"
+                size={20}
+              />
+            </View>
+            <View style={styles.replanTextGroup}>
+              <Text style={styles.replanTitle}>Plan review</Text>
+              <Text style={styles.replanBody}>
+                See how the last 7 days went, and tune your estimates.
+              </Text>
+            </View>
+            <MaterialCommunityIcons
+              color={t.colors.textMuted}
+              name="chevron-right"
+              size={20}
+            />
+          </TouchableOpacity>
+        )}
 
-        {/* Always here, between the two cards — and every tag is always here,
-            not just the ones in use. A tag with nothing behind it opens an
-            empty screen whose `+` creates its first task, which is the only way
-            a task can come to carry a tag: the chips left the create sheet, so
-            a vocabulary entry that disappeared because nothing used it would be
-            gone for good. Empty when unused, never missing.
+        {/* Career is a separate destination with its own internal navigation. It
+            sits with the other secondary destinations so the home screen stays
+            about today. The summary is derived from the career document; no
+            progress is invented when the document is empty. */}
+        {career && onOpenCareer && (
+          <TouchableOpacity
+            accessibilityLabel="Open career"
+            accessibilityRole="button"
+            onPress={onOpenCareer}
+            style={styles.replanTile}
+          >
+            <View style={styles.replanIcon}>
+              <MaterialCommunityIcons
+                color={t.colors.primary}
+                name="briefcase-outline"
+                size={20}
+              />
+            </View>
+            <View style={styles.replanTextGroup}>
+              <Text style={styles.replanTitle}>Career</Text>
+              <Text style={styles.replanBody}>
+                {career.hasProfile
+                  ? `${career.activeGoalCount} active goal${
+                      career.activeGoalCount === 1 ? '' : 's'
+                    } · ${career.suggestion}`
+                  : 'Set a direction and build evidence over time.'}
+              </Text>
+            </View>
+            <MaterialCommunityIcons
+              color={t.colors.textMuted}
+              name="chevron-right"
+              size={20}
+            />
+          </TouchableOpacity>
+        )}
+
+        {/* Always here, in its own section below the daily essentials — and
+            every tag is always here, not just the ones in use. A tag with
+            nothing behind it opens an empty screen whose `+` creates its first
+            task, which is the only way a task can come to carry a tag: the chips
+            left the create sheet, so a vocabulary entry that disappeared because
+            nothing used it would be gone for good. Empty when unused, never
+            missing.
 
             The last slot is not a chip at rest: it is the way to a tag that does
             not exist yet, and until it is focused it shows nothing — no label, no
@@ -381,8 +497,18 @@ export function HomeScreen({
           </View>
         </View>
 
-        {/* Replaces the old `completedByTimer` progress bar, which was driven by
-            a flag nothing ever set and so always rendered empty. */}
+        {/* Plan-vs-actual and the end-of-day prompts sit low: they are about
+            looking back, and only matter once the day's work is under way. */}
+        {todayOutcome && <PlanOutcomeSummary outcome={todayOutcome} title="Today: plan vs actual" />}
+        {yesterdayOutcome && <PlanOutcomeSummary outcome={yesterdayOutcome} title="Yesterday: plan vs actual" />}
+        {showReflectionPrompt && (
+          <ReflectionPromptBanner onOpen={() => onOpenReflection?.()} onDismiss={() => onDismissReflection?.()} />
+        )}
+        {__DEV__ && SHOW_DEV_PREVIEW && <DevPreviewBar />}
+
+        {/* Progress over time: the history bars. Kept, but demoted — it answers
+            "how have I been doing?", which is worth a scroll rather than the
+            first screenful. */}
         <ProductivityDashboard model={history} />
       </ScrollView>
 
@@ -390,15 +516,7 @@ export function HomeScreen({
           scrollable content so it stays put no matter how long the page is.
           Padded by the bottom safe-area inset so the home indicator never clips
           the button. */}
-      <View
-        style={[
-          styles.exportFooter,
-          {
-            paddingBottom: Math.max(insets.bottom, 12),
-            marginBottom: insets.bottom > 0 ? 0 : 4,
-          },
-        ]}
-      >
+      <View style={[styles.exportFooter, footerStyle]}>
         <TouchableOpacity
           accessibilityLabel="Export tasks"
           accessibilityRole="button"
@@ -431,7 +549,7 @@ export function HomeScreen({
         visible={sheetVisible}
         suggestion={activeSuggestion}
         onClose={() => setSheetVisible(false)}
-        onActionPrimary={(s) => {
+        onActionPrimary={() => {
           setSheetVisible(false);
           onOpenReplan();
         }}

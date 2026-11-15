@@ -1,9 +1,9 @@
 /**
  * The settings screen's controller: the cross-domain intent behind the controls.
  *
- * Settings reaches into four domains — the theme's override, the notification
- * permission, the task list and the productivity log — so the confirmations and
- * the actions they gate live here rather than in the view. `SettingsScreen` stays
+ * Settings reaches into five domains — the theme's override, the notification
+ * permission, the task list, the productivity log and the career document — so
+ * the confirmations and the actions they gate live here rather than in the view. `SettingsScreen` stays
  * presentational: it prints the state it is given and reports what was tapped.
  *
  * Task clearing is *passed in* rather than reached for here. Emptying the list
@@ -19,6 +19,7 @@ import { Alert } from 'react-native';
 
 import { useNotifications, type PermissionState } from '../notifications';
 import { useProductivity } from '../productivity';
+import { useCareer } from '../career';
 import { useThemeControls, type ThemePreference } from '../theme/useTheme';
 
 export type Settings = {
@@ -35,6 +36,8 @@ export type Settings = {
   confirmClearTasks: () => void;
   /** Confirms, then wipes the focus history. */
   confirmClearProductivity: () => void;
+  /** Confirms, then wipes the career document. */
+  confirmClearCareer: () => void;
 };
 
 export type SettingsDeps = {
@@ -47,6 +50,7 @@ export function useSettings({ taskCount, onClearTasks }: SettingsDeps): Settings
   const { preference, setPreference } = useThemeControls();
   const { permission, requestPermission } = useNotifications();
   const { resetProductivity } = useProductivity();
+  const { resetCareer } = useCareer();
 
   // The provider normalises the promise and stores the answer; the view only
   // needs to fire the request, so nothing here waits on the result.
@@ -76,6 +80,17 @@ export function useSettings({ taskCount, onClearTasks }: SettingsDeps): Settings
     );
   }, [resetProductivity]);
 
+  const confirmClearCareer = useCallback(() => {
+    Alert.alert(
+      'Clear career data?',
+      'This removes your career profile, goals, skills, milestones, evidence and achievements. It cannot be undone. Tasks and focus history are kept.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Clear career data', style: 'destructive', onPress: resetCareer },
+      ],
+    );
+  }, [resetCareer]);
+
   return {
     preference,
     setPreference,
@@ -84,5 +99,6 @@ export function useSettings({ taskCount, onClearTasks }: SettingsDeps): Settings
     taskCount,
     confirmClearTasks,
     confirmClearProductivity,
+    confirmClearCareer,
   };
 }

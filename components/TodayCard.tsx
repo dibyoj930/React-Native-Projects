@@ -93,8 +93,9 @@ const createStyles = (t: Theme) =>
     card: {
       backgroundColor: t.colors.surface,
       borderRadius: 16,
-      padding: 16,
-      gap: 12,
+      padding: 14,
+      gap: 10,
+      marginBottom: 12,
       borderWidth: t.mode === 'dark' ? StyleSheet.hairlineWidth : 0,
       borderColor: t.colors.border,
     },

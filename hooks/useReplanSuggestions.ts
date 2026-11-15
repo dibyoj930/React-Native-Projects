@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import type { ReplanSuggestion } from '../replan';
 import { computeSuggestions } from '../replan';
-import { loadReplanDoc, saveReplanDoc } from '../replan';
+import { loadReplanDoc, saveSuggestions } from '../replan';
 import type {
   DayPlan,
   ReplanDoc,
@@ -89,7 +89,7 @@ export function useReplanSuggestions(
       ? doc.suggestions
       : emptyState(today, now);
   const dismissedIds = state.dismissedIds;
-  const snoozedUntil = state.snoozedUntil ?? {};
+  const snoozedUntil = useMemo(() => state.snoozedUntil ?? {}, [state.snoozedUntil]);
 
   const suggestions = useMemo(() => {
     if (!hydrated || anyTimerRunning || !plan) return [];
@@ -144,7 +144,7 @@ export function useReplanSuggestions(
       if (!doc) return;
       const nextDoc: ReplanDoc = { ...doc, suggestions: nextState };
       setDoc(nextDoc);
-      saveReplanDoc(nextDoc).catch(() => {});
+      saveSuggestions(nextState).catch(() => {});
     },
     [doc],
   );

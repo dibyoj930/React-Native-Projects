@@ -70,29 +70,42 @@ function blocks(proposal: ReturnType<typeof build>) {
 }
 
 describe('buildReplanProposal — the reference scenario', () => {
-  it('places the three tasks, the break and skips the commitment', () => {
+  it('spreads the three tasks and the break across the free time', () => {
+    // No longer front-loaded: the work is distributed between now and the end
+    // of the day, with the commitment skipped and blocks kept in order.
     expect(blocks(build())).toEqual([
       ['report', at(14, 0), at(14, 45)],
-      ['prs', at(14, 55), at(15, 25)],
-      ['break', at(15, 35), at(15, 50)],
-      ['notes', at(16, 30), at(16, 55)],
+      ['prs', at(15, 9), at(15, 39)],
+      ['break', at(16, 33), at(16, 48)],
+      ['notes', at(17, 12), at(17, 37)],
     ]);
   });
 
-  it('leaves 4:55 PM to 6:00 PM unbooked', () => {
+  it('does not leave a large tail idle', () => {
     const proposal = build();
     const last = proposal.placements[proposal.placements.length - 1];
-    expect(last.end).toBe(at(16, 55));
-    expect(at(18, 0) - last.end).toBe(65 * 60_000);
+    expect(last.end).toBe(at(17, 37));
+    // The old front-loaded plan finished at 4:55 PM and left 65 minutes empty.
+    expect(at(18, 0) - last.end).toBeLessThan(60 * 60_000);
   });
 
-  it('schedules after the commitment with the matching reason code', () => {
-    const outcome = build().outcomes.find((entry) => entry.taskId === 'notes');
+  it('places a task that fits only after a commitment with the matching code', () => {
+    const lunch: ProtectedInterval = {
+      id: 'lunch',
+      kind: 'commitment',
+      start: at(14, 30),
+      end: at(15, 0),
+    };
+    const proposal = build({
+      commitments: [lunch],
+      todos: [todo({ id: 'after', estimatedMinutes: 45, priority: 'high' })],
+    });
+    const outcome = proposal.outcomes.find((entry) => entry.taskId === 'after');
     expect(outcome).toMatchObject({
       classification: 'scheduled',
       reasonCode: 'scheduled_after_commitment',
-      start: at(16, 30),
-      end: at(16, 55),
+      start: at(15, 0),
+      end: at(15, 45),
     });
   });
 
@@ -235,12 +248,30 @@ describe('buildReplanProposal — kept and moved', () => {
     expect(outcome?.reasonCode).toBe('kept');
   });
 
-  it('moves a task whose approved start changed', () => {
+  it('keeps a task whose approved start is still near the balanced position', () => {
+    // 15:00 is within one gap of the balanced target, so stability wins and the
+    // placement is preserved rather than churned.
     const plan = {
       dayKey: DAY,
       approvedAt: at(13, 0),
       signature: 'sig',
       placements: [{ taskId: 'report', start: at(15, 0), end: at(15, 45) }],
+    };
+    const proposal = build({
+      todos: [todo({ id: 'report', text: 'Project report', estimatedMinutes: 45, priority: 'high' })],
+      approvedPlan: plan,
+    });
+    const outcome = proposal.outcomes.find((entry) => entry.taskId === 'report');
+    expect(outcome).toMatchObject({ reasonCode: 'kept', start: at(15, 0) });
+  });
+
+  it('moves a task whose approved start no longer fits (blocked by a commitment)', () => {
+    const plan = {
+      dayKey: DAY,
+      approvedAt: at(13, 0),
+      signature: 'sig',
+      // Ends inside the 4:00-4:30 commitment, so it cannot be honoured.
+      placements: [{ taskId: 'report', start: at(15, 55), end: at(16, 40) }],
     };
     const proposal = build({ approvedPlan: plan });
     const outcome = proposal.outcomes.find((entry) => entry.taskId === 'report');

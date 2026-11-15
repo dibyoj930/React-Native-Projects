@@ -1,6 +1,7 @@
 /**
  * Task mutation operations and rules (business logic extracted from UI).
  */
+import { sanitizeCareerLink } from '../shared/careerLink';
 import type { Todo, TodoDraft } from './model';
 
 export type TaskContext = {
@@ -46,6 +47,11 @@ export function applyDraftToTodo(todo: Todo, draft: TodoDraft): Todo {
     estimatedMinutes: draft.estimatedMinutes,
     schedulingMode: draft.schedulingMode,
     fixedStartAt: draft.schedulingMode === 'fixed' ? todo.fixedStartAt : undefined,
+    // The task sheet always returns its whole selection, so the draft is
+    // authoritative here in the same way the date and estimate are: an empty
+    // selection removes the link. Sanitising keeps a malformed draft from
+    // becoming a dangling reference on disk.
+    career: sanitizeCareerLink(draft.career),
   };
 }
 
@@ -74,5 +80,29 @@ export function createTodoFromDraft(draft: TodoDraft, id: string, ctx: TaskConte
     priority: draft.priority,
     estimatedMinutes: draft.estimatedMinutes,
     schedulingMode: draft.schedulingMode,
+    career: sanitizeCareerLink(draft.career),
   };
+}
+
+/**
+ * Rewrites one task's estimate, leaving every other field untouched.
+ *
+ * This is the narrow write behind plan-review calibration: the only thing a
+ * suggested adjustment is allowed to change is `estimatedMinutes`. Going through
+ * the full draft path would force the caller to reconstruct a draft and could
+ * drop unrelated fields; a targeted write cannot.
+ *
+ * A non-positive minute count clears the estimate (`undefined`) rather than
+ * storing a meaningless 0, matching how a missing estimate is represented
+ * everywhere else — including the scheduler's `needsInformation` rule.
+ */
+export function withEstimatedMinutes(
+  todos: readonly Todo[],
+  id: string,
+  minutes: number,
+): Todo[] {
+  const normalized = minutes > 0 ? Math.round(minutes) : undefined;
+  return todos.map((todo) =>
+    todo.id === id ? { ...todo, estimatedMinutes: normalized } : todo,
+  );
 }

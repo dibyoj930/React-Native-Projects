@@ -5,12 +5,13 @@
  * in). Identical normalised input => identical placements, classifications and
  * reason codes. Integer minutes only; half-open `[start, end)`.
  *
- * This file composes the other pure modules: interval.ts, rank.ts, normalize.ts,
- * validate.ts and explain.ts.
+ * This file composes the other pure modules: interval.ts, rank.ts, placement.ts,
+ * normalize.ts, validate.ts and explain.ts.
  */
 
 import { MINUTE_MS, subtractIntervals } from './interval';
-import { rankFlexibleTasks } from './rank';
+import { rankSchedulableTasks } from './rank';
+import { scheduleBlocks, type BlockRequest } from './placement';
 import { validateSchedule } from './validate';
 import { explainOutcome } from './explain';
 import type {
@@ -33,32 +34,6 @@ type PlacedTask = {
   start: number;
   end: number;
 };
-
-/**
- * The earliest `start >= desiredStart` in a free segment that fits `durationMs`
- * and, when the task has a deadline, ends by it. `null` when no such slot exists.
- */
-function findSlot(
-  segments: readonly Interval[],
-  desiredStart: number,
-  durationMs: number,
-  deadlineAt?: number,
-): number | null {
-  for (const segment of segments) {
-    // A segment that ends before the desired point cannot hold the block; one
-    // that starts after it is fine — the cursor fell inside a commitment, so the
-    // next free window begins where the commitment ends. That is the "no buffer
-    // after a commitment" rule: skipping forward costs no buffer of its own.
-    const start = Math.max(desiredStart, segment.start);
-    if (start + durationMs > segment.end) continue;
-    if (deadlineAt !== undefined && start + durationMs > deadlineAt) {
-      // Segments are sorted by start, so every later segment is worse.
-      break;
-    }
-    return start;
-  }
-  return null;
-}
 
 /** True when the block starting at `start` follows a protected interval directly. */
 function startsRightAfterProtected(
@@ -107,78 +82,81 @@ export function buildReplanProposal(input: ReplanInput): ReplanProposal {
   // 3. Free segments inside the workday, after commitments and busy windows.
   const segments = subtractIntervals(workday, protectedIntervals);
 
-  // 4. Rank the flexible tasks once; placement order is the ranking order.
-  const ranked = rankFlexibleTasks(flexible);
-
-  const placements: Placement[] = [];
-  const placedByTask = new Map<string, PlacedTask>();
-  let cursor: number | null = null;
-  let workMinutes = 0;
-  let breakPlaced = false;
-
-  const nextCursor = (): number => (cursor === null ? effectiveStart : cursor);
+  // 4. Placement order: a hard deadline dominates priority (see rank.ts), so an
+  //    urgent task is never crowded out by a non-urgent higher-priority one.
+  const ranked = rankSchedulableTasks(flexible);
 
   // Mode B: defer low-priority tasks even when time remains. Never a silent
   // default — it requires both `mode === 'protect'` and the explicit toggle.
   const deferLow = mode === 'protect' && lowPriorityDeferral;
 
-  /**
-   * Insert ONE break once cumulative work first reaches the threshold, placed at
-   * the current cursor and separated from neighbouring blocks like a work block.
-   * If it cannot fit, it is retried ahead of the next task.
-   */
-  const maybePlaceBreak = (): void => {
-    if (breakPlaced || breakMinutes <= 0) return;
-    if (workMinutes < breakAfterMinutes) return;
-    const slot = findSlot(segments, nextCursor(), breakMinutes * MINUTE_MS);
-    if (slot === null) return;
-    placements.push({
-      taskId: BREAK_ID,
-      start: slot,
-      end: slot + breakMinutes * MINUTE_MS,
-      kind: 'break',
-    });
-    cursor = slot + (breakMinutes + bufferMinutes) * MINUTE_MS;
-    breakPlaced = true;
-  };
-
-  // 5–8. Earliest-fit placement in ranking order: a buffer between work blocks,
-  //       deadlines respected, and the single break once work adds up.
-  for (const task of ranked) {
-    if (task.estimatedMinutes === undefined) continue; // -> needsInformation
+  // 5. The placeable set: a valid duration and a deadline that is still
+  //    reachable from `now`. Everything else is classified without a placement
+  //    attempt (missing duration, past/too-soon deadline, or Mode B deferral).
+  const placeable = ranked.filter((task) => {
+    if (task.estimatedMinutes === undefined) return false;
     const durationMs = task.estimatedMinutes * MINUTE_MS;
-
-    // Infeasible before any placement attempt: never schedule in the past, never
-    // promise a finish after a deadline.
-    if (task.deadlineAt !== undefined && task.deadlineAt <= nowRounded) continue;
+    if (task.deadlineAt !== undefined && task.deadlineAt <= nowRounded) return false;
     if (task.deadlineAt !== undefined && nowRounded + durationMs > task.deadlineAt) {
-      continue;
+      return false;
     }
+    if (deferLow && task.priority === 'low') return false;
+    return true;
+  });
 
-    // Deferral is checked after the deadline guards so a low task that cannot
-    // fit anyway reports the real infeasibility rather than a deferral.
-    if (deferLow && task.priority === 'low') continue;
-
-    maybePlaceBreak();
-
-    const slot = findSlot(
-      segments,
-      Math.max(nextCursor(), effectiveStart),
-      durationMs,
-      task.deadlineAt,
-    );
-    if (slot === null) continue;
-
-    const end = slot + durationMs;
-    placements.push({ taskId: task.id, start: slot, end, kind: 'task' });
-    placedByTask.set(task.id, { taskId: task.id, start: slot, end });
-    cursor = end + bufferMinutes * MINUTE_MS;
-    workMinutes += task.estimatedMinutes;
+  // 6. Build the block list in placement order, inserting the single break once
+  //    cumulative work first reaches the threshold.
+  const blocks: BlockRequest[] = [];
+  let cumulativeWork = 0;
+  let breakInserted = false;
+  for (const task of placeable) {
+    const estimatedMinutes = task.estimatedMinutes as number;
+    blocks.push({
+      id: task.id,
+      durationMs: estimatedMinutes * MINUTE_MS,
+      deadlineAt: task.deadlineAt,
+      plannedStartAt: task.plannedStartAt,
+    });
+    cumulativeWork += estimatedMinutes;
+    if (!breakInserted && breakMinutes > 0 && cumulativeWork >= breakAfterMinutes) {
+      blocks.push({ id: BREAK_ID, durationMs: breakMinutes * MINUTE_MS });
+      breakInserted = true;
+    }
   }
 
-  maybePlaceBreak();
+  // 7. Stage A + Stage B: choose positions that spread the work across the free
+  //    time while honouring commitments, buffers, deadlines and existing plans.
+  const scheduled = scheduleBlocks(blocks, {
+    segments,
+    protectedIntervals,
+    effectiveStart,
+    bufferMinutes,
+  });
 
-  // 9. Classify every task into one outcome.
+  const placements: Placement[] = [];
+  const placedByTask = new Map<string, PlacedTask>();
+  for (const block of blocks) {
+    const placement = scheduled.get(block.id);
+    if (placement === undefined) continue;
+    const kind = block.id === BREAK_ID ? 'break' : 'task';
+    placements.push({
+      taskId: block.id,
+      start: placement.start,
+      end: placement.end,
+      kind,
+    });
+    if (kind === 'task') {
+      placedByTask.set(block.id, {
+        taskId: block.id,
+        start: placement.start,
+        end: placement.end,
+      });
+    }
+  }
+
+  placements.sort((a, b) => a.start - b.start || a.end - b.end);
+
+  // 8. Classify every task into one outcome.
   const outcomes: TaskOutcome[] = [];
   const unchangedTaskIds: string[] = [];
 
@@ -248,13 +226,13 @@ export function buildReplanProposal(input: ReplanInput): ReplanProposal {
     outcomes.push(outcome);
   }
 
-  // 10. Explanations: machine-typed records; human copy lives in explain.ts.
+  // 9. Explanations: machine-typed records; human copy lives in explain.ts.
   const explanations = outcomes.map((outcome) => {
     const task = input.tasks.find((candidate) => candidate.id === outcome.taskId);
     return explainOutcome(outcome, task?.plannedStartAt);
   });
 
-  // 11. Validate the finished schedule — the engine ships `ok === true`.
+  // 10. Validate the finished schedule — the engine ships `ok === true`.
   const proposal: ReplanProposal = {
     generatedAt: input.now,
     signature: input.signature,

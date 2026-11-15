@@ -73,7 +73,8 @@ export type OutcomeContext = {
 ```
 
 Rules:
-- If task not in plan placements (wasn't scheduled) - not included as "planned task result" in comparison? Focus on planned tasks.
+- Rows are one per planned task, plus one for any task **completed on this day** that the current plan no longer holds (`wasScheduled: false`). A rebuild protects completed work and drops it from the plan, so without this the day's completed count — and its recorded focus — would disappear the moment a new plan is applied. Focus is still read from the session log per task; the schedule is never the source of actual focus.
+- `totalPlanned` counts every row (matching `finalizeOutcome`), so `completed/totalPlanned` stays consistent across apply and review.
 - completed-on-time: completed is true and completedAt is <= plannedEnd + grace? Or just completedAt <= plannedEnd? Define simple: completed-on-time if completed and completedAt <= plannedEnd (or within small window). Or if completed same day before or at planned end. 
 - completed-late: completed true, completedAt > plannedEnd
 - postponed: was scheduled (in plan) but not completed by end of day and day ended? Or if still not completed now and it's end of day context - "postponed" means moved to later (not done today). So if not completed and (now is past workday end or we’re computing for closed day), status is postponed/missed. For "ongoing" comparison during day, use 'ongoing'.

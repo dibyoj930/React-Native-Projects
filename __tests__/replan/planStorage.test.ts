@@ -17,6 +17,7 @@ import {
   sanitizeReplanDoc,
   savePlan,
   saveReplanDoc,
+  saveSuggestions,
 } from '../../replan/planStorage';
 import type { DayPlan } from '../../replan/types';
 
@@ -124,5 +125,23 @@ describe('clearPlan', () => {
     const doc = await loadReplanDoc();
     expect(doc.plan).toBeNull();
     expect(doc.preferences.workdayStart).toBe('08:00');
+  });
+});
+
+describe('concurrent mutations', () => {
+  it('does not let a simultaneous apply and suggestion write clobber each other', async () => {
+    // Each helper loads the whole document, merges its own field and writes it
+    // back. Started together they would both read the pre-merge document and the
+    // second write would erase the first's field — so the merge must be
+    // serialised, and both fields must survive.
+    const suggestions = { dayKey: PLAN.dayKey, dismissedIds: ['x'], lastEvaluatedAt: 5 };
+    await Promise.all([
+      savePlan(DEFAULT_REPLAN_PREFERENCES, PLAN),
+      saveSuggestions(suggestions),
+    ]);
+
+    const doc = await loadReplanDoc();
+    expect(doc.plan).toEqual(PLAN);
+    expect(doc.suggestions).toEqual(suggestions);
   });
 });

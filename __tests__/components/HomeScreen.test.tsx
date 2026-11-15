@@ -15,7 +15,7 @@ import React from 'react';
 import ReactTestRenderer from 'react-test-renderer';
 
 import { HomeScreen, type HomeScreenProps } from '../../components/HomeScreen';
-import type { HistoryViewModel, TodayViewModel } from '../../hooks/useProductivityView';
+import type { HistoryViewModel, NextTaskViewModel, TodayViewModel } from '../../hooks/useProductivityView';
 import type { Todo } from '../../todos/model';
 import { AVAILABLE_TAGS } from '../../todos/tags';
 import { byLabel, focusText, labels, press, submitText, textContent, typeText, visibleText, withRendered } from '../support/render';
@@ -295,6 +295,38 @@ describe('HomeScreen — the replan entry', () => {
     await withRendered(screen({ replanAvailable: false }), (renderer) => {
       expect(labels(renderer)).not.toContain('Replan my day');
       expect(visibleText(renderer)).not.toContain('Replan my day');
+    });
+  });
+});
+
+describe('HomeScreen — the next-task card', () => {
+  const nextTask: NextTaskViewModel = {
+    state: 'task',
+    id: 'a',
+    title: 'Write the design doc',
+    reason: 'Due today',
+    plannedLabel: null,
+    isNow: false,
+    isRunning: false,
+    timerLabel: '00:00:00',
+  };
+
+  it('leads with the next task and wires Start focus to the task id', async () => {
+    const onStartFocus = jest.fn();
+    await withRendered(
+      screen({ todos: [todo({ id: 'a' })], nextTask, onStartFocus }),
+      async (renderer) => {
+        expect(visibleText(renderer)).toContain('Write the design doc');
+        expect(labels(renderer)).toContain('Start focus');
+        await press(renderer, 'Start focus');
+        expect(onStartFocus).toHaveBeenCalledWith('a');
+      },
+    );
+  });
+
+  it('omits the card when no model is supplied, rather than showing a dead button', async () => {
+    await withRendered(screen(), (renderer) => {
+      expect(labels(renderer)).not.toContain('Start focus');
     });
   });
 });

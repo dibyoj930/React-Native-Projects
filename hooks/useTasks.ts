@@ -15,7 +15,11 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { nextTodoId, type Todo, type TodoDraft } from '../todos/model';
-import { applyDraftToTodo, createTodoFromDraft } from '../todos/taskOperations';
+import {
+  applyDraftToTodo,
+  createTodoFromDraft,
+  withEstimatedMinutes,
+} from '../todos/taskOperations';
 import { loadTodos, saveTodos } from '../todos/taskRepository';
 
 export function useTasks() {
@@ -120,6 +124,17 @@ export function useTasks() {
     );
   }, []);
 
+  /**
+   * Rewrites one task's estimate.
+   *
+   * A targeted write rather than an edit draft: plan-review calibration is only
+   * allowed to change the estimate, and routing it through the full draft path
+   * would risk dropping a field the calibration screen never saw.
+   */
+  const setEstimatedMinutes = useCallback((id: string, minutes: number) => {
+    setTodos((prev) => withEstimatedMinutes(prev, id, minutes));
+  }, []);
+
   return {
     todos,
     hydrated,
@@ -129,5 +144,6 @@ export function useTasks() {
     clearTasks,
     completeTodos,
     setCompleted,
+    setEstimatedMinutes,
   };
 }

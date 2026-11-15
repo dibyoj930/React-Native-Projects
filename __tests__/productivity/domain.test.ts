@@ -159,6 +159,47 @@ describe('session lifecycle', () => {
     const s = pauseSession(startSession('s1', 't', at(2026, 5, 1, 10)), at(2026, 5, 1, 9));
     expect(closeSession(s, 'stopped', at(2026, 5, 1, 9)).focusedSeconds).toBe(0);
   });
+
+  it('carries a career link through pause, resume and close', () => {
+    const career = { goalId: 'goal-1', milestoneId: 'm-1', skillIds: ['s-1'] };
+    let s = startSession('s1', 'task-1', at(2026, 5, 1, 10, 0), undefined, career);
+    expect(s.career).toEqual(career);
+
+    s = pauseSession(s, at(2026, 5, 1, 10, 5));
+    expect(s.career).toEqual(career);
+
+    s = resumeSession(s, at(2026, 5, 1, 10, 8));
+    const closed = closeSession(s, 'stopped', at(2026, 5, 1, 10, 10));
+    expect(closed.career).toEqual(career);
+  });
+});
+
+describe('a session cannot out-accrue its timer', () => {
+  const start = at(2026, 5, 1, 10, 0);
+  const end = at(2026, 5, 1, 10, 25);
+
+  it('settles a restored session at the timer end, not at wall-clock now', () => {
+    // Started a 25-minute timer, then the app was killed and reopened an hour
+    // later. Closing it then must credit the 25 minutes the timer could have
+    // run, not the hour the process was gone.
+    const s = startSession('s1', 'task-1', start, end);
+    const closed = closeSession(s, 'completed', at(2026, 5, 1, 11, 0));
+    expect(closed.focusedSeconds).toBe(25 * 60);
+    expect(closed.endedAt).toBe(end);
+  });
+
+  it('clamps a pause that happens after the timer would have ended', () => {
+    const s = startSession('s1', 'task-1', start, end);
+    const paused = pauseSession(s, at(2026, 5, 1, 11, 0));
+    expect(paused.accumulatedSeconds).toBe(25 * 60);
+  });
+
+  it('leaves a session with no timer unbounded, as legacy data was', () => {
+    const s = startSession('s1', 'task-1', start);
+    const closed = closeSession(s, 'stopped', at(2026, 5, 1, 11, 0));
+    expect(closed.focusedSeconds).toBe(60 * 60);
+    expect(closed.endedAt).toBe(at(2026, 5, 1, 11, 0));
+  });
 });
 
 describe('attribution replaces the completedByTimer flag', () => {

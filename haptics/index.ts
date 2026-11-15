@@ -70,7 +70,6 @@ function loadNativeModule(): HapticModule | null {
   if (cachedModule !== undefined) return cachedModule;
 
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
     cachedModule = require('react-native-haptic-feedback') as HapticModule;
     if (!warned) {
       warned = true;

@@ -21,6 +21,32 @@ import type { DayPlan, ReplanDoc, ReplanPreferences } from './types';
 
 export const REPLAN_STORAGE_KEY = '@replan/v1';
 
+/**
+ * Serialises the read-modify-write helpers below.
+ *
+ * `savePlan`, `savePreferences` and `saveSuggestions` each load the document,
+ * merge their field and write the whole thing back. Two running at once would
+ * each read the pre-merge document and the second write would erase the first's
+ * field — an Apply landing beside a suggestion dismissal would silently drop one
+ * of them. Chaining them means every merge sees the previous write's result.
+ *
+ * `saveReplanDoc` is deliberately *outside* the chain: it is a bare single write
+ * and the helpers above call it from inside their own turn, so queuing it too
+ * would deadlock the helper waiting on a slot its own turn holds.
+ */
+let mutationQueue: Promise<unknown> = Promise.resolve();
+
+function serialized<T>(task: () => Promise<T>): Promise<T> {
+  const run = mutationQueue.then(task, task);
+  // Keep the chain alive regardless of outcome; a rejected write must not wedge
+  // every later one.
+  mutationQueue = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
 /** `{ version: 1, preferences: defaults, plan: null }`. */
 export function emptyReplanDoc(): ReplanDoc {
   return {
@@ -78,7 +104,7 @@ export function sanitizeReplanDoc(value: unknown): ReplanDoc {
   if (raw.version !== 1) return emptyReplanDoc();
   const plan = sanitizeDayPlan(raw.plan);
   const suggestions = raw.suggestions as any;
-  let cleanedSuggestions = undefined;
+  let cleanedSuggestions: ReplanDoc['suggestions'];
   if (suggestions && typeof suggestions === 'object') {
     cleanedSuggestions = {
       dayKey: typeof suggestions.dayKey === 'string' ? suggestions.dayKey : plan?.dayKey ?? '',
@@ -124,15 +150,49 @@ export async function savePlan(
   preferences: ReplanPreferences,
   plan: DayPlan,
 ): Promise<void> {
-  await saveReplanDoc({
-    version: 1,
-    preferences: sanitizeReplanPreferences(preferences),
-    plan: sanitizeDayPlan(plan),
+  return serialized(async () => {
+    const current = await loadReplanDoc();
+    await saveReplanDoc({
+      ...current,
+      version: 1,
+      preferences: sanitizeReplanPreferences(preferences),
+      plan: sanitizeDayPlan(plan),
+    });
+  });
+}
+
+/** Persist preference changes, preserving plan and suggestions. */
+export async function savePreferences(
+  preferences: ReplanPreferences,
+): Promise<void> {
+  return serialized(async () => {
+    const current = await loadReplanDoc();
+    await saveReplanDoc({
+      ...current,
+      version: 1,
+      preferences: sanitizeReplanPreferences(preferences),
+    });
+  });
+}
+
+/** Persist suggestions state, preserving preferences and plan. */
+export async function saveSuggestions(
+  suggestions: ReplanDoc['suggestions'],
+): Promise<void> {
+  return serialized(async () => {
+    const current = await loadReplanDoc();
+    await saveReplanDoc({
+      ...current,
+      version: 1,
+      suggestions,
+    });
   });
 }
 
 /** Keep preferences, drop the approved plan (an Apply is undone by re-planning). */
 export async function clearPlan(): Promise<void> {
-  const doc = await loadReplanDoc();
-  await saveReplanDoc({ ...doc, plan: null });
+  return serialized(async () => {
+    const doc = await loadReplanDoc();
+    await saveReplanDoc({ ...doc, plan: null });
+  });
 }

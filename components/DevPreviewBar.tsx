@@ -12,8 +12,9 @@
  * storage: pressing "Adjust plan" simply closes the sheet.
  */
 import React, { useMemo, useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { DevSettings, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
+import { clearPlanReviewSeed, seedPlanReview } from '../dev/planReviewSeed';
 import { ReplanSuggestionSheet } from './ReplanSuggestionSheet';
 import { ReflectionModal } from './ReflectionModal';
 import type { ReplanSuggestion } from '../replan';
@@ -29,6 +30,22 @@ const SAMPLE_SUGGESTION: ReplanSuggestion = {
   createdAt: 0,
   metadata: {},
 };
+
+/**
+ * Seed or clear the fixture, then reload.
+ *
+ * A reload is the honest way to apply it: the task list, focus log, plan and
+ * outcomes are all read once at startup, so writing storage underneath a running
+ * tree would show stale state. Reloading re-hydrates from the seeded data, and
+ * the real Plan Review screen (reached from Home) renders it end to end.
+ */
+function reloadAfter(work: Promise<void>): void {
+  work
+    .then(() => DevSettings.reload())
+    .catch(() => {
+      // A dev tool has nowhere better to report a failed seed; swallow it.
+    });
+}
 
 export function DevPreviewBar() {
   const t = useTheme();
@@ -60,6 +77,24 @@ export function DevPreviewBar() {
           style={styles.button}
         >
           <Text style={styles.buttonText}>Reflection</Text>
+        </TouchableOpacity>
+      </View>
+      <View style={styles.row}>
+        <TouchableOpacity
+          accessibilityLabel="Seed plan review data"
+          accessibilityRole="button"
+          onPress={() => reloadAfter(seedPlanReview())}
+          style={styles.button}
+        >
+          <Text style={styles.buttonText}>Seed review</Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          accessibilityLabel="Clear seeded data"
+          accessibilityRole="button"
+          onPress={() => reloadAfter(clearPlanReviewSeed())}
+          style={styles.button}
+        >
+          <Text style={styles.buttonText}>Clear data</Text>
         </TouchableOpacity>
       </View>
 

@@ -27,7 +27,7 @@ import {
   normalizeReplanTasks,
   type RawTimerWindow,
 } from '../replan/normalize';
-import { loadReplanDoc, savePlan, saveReplanDoc } from '../replan/planStorage';
+import { loadReplanDoc, savePlan, savePreferences } from '../replan/planStorage';
 import { DEFAULT_REPLAN_PREFERENCES, resolveWorkday } from '../replan/preferences';
 import type {
   DayPlan,
@@ -214,7 +214,15 @@ export function useReplan(options: UseReplanOptions): ReplanController {
     };
 
     await savePlan(preferences, plan);
-    setDoc({ version: 1, preferences, plan });
+    // Functional update so the in-memory document keeps whatever the
+    // suggestions controller has stored. Rebuilding the object from `doc`
+    // captured in this callback would drop a dismissal that landed mid-apply.
+    setDoc((prev) => ({
+      version: 1,
+      preferences,
+      plan,
+      suggestions: prev?.suggestions,
+    }));
     // A persisted plan is no longer stale by definition.
     setStale(false);
   }, [proposal, preferences, today, buildInput]);
@@ -233,9 +241,14 @@ export function useReplan(options: UseReplanOptions): ReplanController {
    */
   const setPreferences = useCallback(
     (next: ReplanPreferences) => {
-      const updated: ReplanDoc = { version: 1, preferences: next, plan: doc?.plan ?? null };
+      const updated: ReplanDoc = {
+        version: 1,
+        preferences: next,
+        plan: doc?.plan ?? null,
+        suggestions: doc?.suggestions,
+      };
       setDoc(updated);
-      saveReplanDoc(updated).catch(() => {});
+      savePreferences(next).catch(() => {});
       setProposal(null);
       setStale(false);
     },

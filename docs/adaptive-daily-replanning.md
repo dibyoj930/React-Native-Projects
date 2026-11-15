@@ -44,7 +44,7 @@ App.tsx:40  <SafeAreaProvider>
    clock: now ──────────────────┤            ▲                    │                (PURE, NOT persisted)
    preferences (ReplanDoc.prefs)┘        replan/rank.ts            │
                                           replan/interval.ts   replan/validate.ts
-                                                               replan/explain.ts
+                                          replan/placement.ts  replan/explain.ts
                                                                    │
                                                                    ▼
                                                         components/ReplanScreen.tsx  (preview timeline,
@@ -74,7 +74,7 @@ App.tsx:40  <SafeAreaProvider>
  │ replan/interval.ts     replan/engine.ts      │◄────┤ hooks/useReplan.ts                          │
  │ replan/preferences.ts  replan/validate.ts    │     │ hooks/usePlanReminders.ts -> notifications/  │
  │ replan/rank.ts         replan/explain.ts     │     │ components/ReplanScreen.tsx                 │
- │ replan/planReminders.ts                      │     │ components/ReplanTimeline.tsx               │
+ │ replan/planReminders.ts replan/placement.ts │     │ components/ReplanTimeline.tsx               │
  └──────────────────────────────────────────────┘     └────────────────────────────────────────────┘
    (mirrors productivity/domain.ts:13,23 — tests import the pure barrel and need no mocks)
 ```
@@ -198,7 +198,10 @@ Guarantees: identical normalised input ⇒ identical schedule, classifications, 
 - `replan/preferences.ts` — prefs type, defaults, `sanitizeReplanPreferences` (mirrors `goals.ts:79`).
 - `replan/normalize.ts` — raw tasks + timers + commitments + now → validated `ReplanInput`; flags missing
   durations and conflicting commitments; never guesses.
-- `replan/rank.ts` — the comparator below.
+- `replan/rank.ts` — the placement-order comparator (`compareForScheduling`) and the display comparator
+  (`compareReplanTasks`).
+- `replan/placement.ts` — two-stage spread placement: `candidateStarts` (Stage A), `isAdmissible`, and
+  `scheduleBlocks` (Stage B). The single tunable, `SPREAD_FILL`, lives here.
 - `replan/engine.ts` — the phase pipeline.
 - `replan/validate.ts` — `validateSchedule` (must be violation-free).
 - `replan/explain.ts` — `ReasonCode` → calm, locale-free sentence + structured params.
@@ -213,15 +216,22 @@ Guarantees: identical normalised input ⇒ identical schedule, classifications, 
 3. **Subtract protected intervals.** Remaining − commitments − active-timer windows → sorted free segments.
 4. **Separate.** Completed (unchanged) · active-timer (unchanged/protected) · fixed tasks (protected at
    `fixedStartAt`) · flexible tasks (to place).
-5. **Rank** (documented): priority high→medium→low (tasks with no `priority` rank as low); earliest hard
-   deadline first (no-deadline last); earliest existing planned start (none last); stable tie-break `createdAt`
-   then `id` (shuffle-invariant).
-6. **Find feasible slots.** Earliest-fit: earliest `s ≥ cursor` inside one free segment, and
-   `s + duration ≤ deadline` when a deadline exists.
-7. **Place.** `cursor = end + bufferMinutes` after each task; skip commitments by jumping to the next segment
-   (⇒ natural pre-commitment buffer, no post-commitment buffer). Insert **one break** of `breakMinutes` after
-   the block where cumulative work first reaches `breakAfterMinutes`, buffer-separated like a work block.
-8. **Recalculate feasibility.** Break/buffer insertion never forces a violation; squeezed tasks are classified.
+5. **Rank** (documented): **earliest hard deadline first** (tasks with no deadline last); then priority
+   high→medium→low (tasks with no `priority` rank as low); then earliest existing planned start (none last);
+   then stable tie-break `createdAt` then `id` (shuffle-invariant). A deadline **dominates priority** so an
+   urgent low-priority task is never crowded out by a non-urgent high-priority one — earliest-deadline-first
+   with no inserted idle is feasibility-optimal here, so this ordering never invents infeasibility.
+6. **Assemble blocks.** Keep tasks with a valid duration and a still-reachable deadline, in ranked order, and
+   insert **one break** of `breakMinutes` after the block where cumulative work first reaches
+   `breakAfterMinutes`.
+7. **Place — two-stage, spread.** *Stage A* enumerates a finite candidate set of starts per block from the free
+   segments (segment edges, the balanced target, the approved start, and the space just after/before an
+   already-placed block). *Stage B* chooses, per block, the admissible candidate nearest a **balanced** target:
+   blocks are spread across the horizon `H = min(F, W + SPREAD_FILL · F)` of the free axis (commitments add no
+   distance), leaving one gap `(H − W) / k` per block. An approved start within one gap of its target is
+   **kept** (no needless churn). Hard constraints are enforced by `isAdmissible`, never by the score.
+8. **Recalculate feasibility.** A block with no admissible candidate is left unplaced and classified — never
+   overlapped, never pushed past a deadline, never placed in the past.
 9. **Classify:** `scheduled` · `deferred` · `infeasible` · `needsInformation` · protected
    (`completed` / `active_timer` / `fixed`).
 10. **Explain.** Structured `ReasonCode` + params: `moved`, `kept`, `scheduled_after_commitment`,
@@ -256,15 +266,14 @@ deadline before day end.
 | Block | Interval | Note |
 |---|---|---|
 | Project report | 14:00–14:45 | scheduled (high) |
-| buffer | 14:45–14:55 | |
-| Review pull requests | 14:55–15:25 | scheduled (medium); cumulative 75 ≥ 60 ⇒ break next |
-| buffer | 15:25–15:35 | |
-| Break | 15:35–15:50 | the one break |
-| buffer | 15:50–16:00 | |
-| Fixed commitment | 16:00–16:30 | protected |
-| Prepare tomorrow's notes | 16:30–16:55 | scheduled (low) — fits only after the commitment |
+| Review pull requests | 15:09–15:39 | scheduled (medium); cumulative 75 ≥ 60 ⇒ break next |
+| Fixed commitment | 16:00–16:30 | protected, never overlapped |
+| Break | 16:33–16:48 | the one break |
+| Prepare tomorrow's notes | 17:12–17:37 | scheduled (low) |
 
-Totals: 100 work + 15 break + 30 commitment + 30 buffer = 175 ≤ 240; 16:55–18:00 stays unbooked.
+Totals: 100 work + 15 break + 30 commitment = 145; free time `F = 210`, work `W = 115` (incl. break), so the
+schedule spreads across the whole free window with one gap of `(210 − 115) / 4 ≈ 24` minutes between blocks —
+well above the 10-minute buffer, which is now a *floor*, not the spacing. 17:37–18:00 (23 min) stays unbooked.
 Mode B instead defers `notes` (`deferred_low_priority`).
 
 ---
@@ -296,9 +305,10 @@ Mode B instead defers `notes` (`deferred_low_priority`).
 ## 5. File-by-file changes
 
 New: `replan/types.ts`, `replan/interval.ts`, `replan/preferences.ts`, `replan/normalize.ts`, `replan/rank.ts`,
-`replan/engine.ts`, `replan/validate.ts`, `replan/explain.ts`, `replan/planStorage.ts`, `replan/planReminders.ts`,
-`replan/index.ts`; `hooks/useReplan.ts`, `hooks/usePlanReminders.ts`; `components/ReplanScreen.tsx`,
-`components/ReplanTimeline.tsx`; tests under `__tests__/replan/`, `__tests__/hooks/`, `__tests__/components/`.
+`replan/placement.ts`, `replan/engine.ts`, `replan/validate.ts`, `replan/explain.ts`, `replan/planStorage.ts`,
+`replan/planReminders.ts`, `replan/index.ts`; `hooks/useReplan.ts`, `hooks/usePlanReminders.ts`;
+`components/ReplanScreen.tsx`, `components/ReplanTimeline.tsx`; tests under `__tests__/replan/`,
+`__tests__/hooks/`, `__tests__/components/`.
 
 Modified: `todos/model.ts` (`:14,80,130`), `todos/taskOperations.ts` (`:29,56`), `components/AddTodoModal.tsx`
 (`:103,116-117,188`), `components/TodoRow.tsx` (`:33,70`), `components/HomeScreen.tsx`,
@@ -315,6 +325,11 @@ Pure (`__tests__/replan/`, no mocks — import the pure barrel, per `productivit
 scenario exact output; commitments never overlapped; no past start; deadlines unchanged; determinism +
 shuffle-invariance; infeasible not dropped; breaks/buffers can't overlap; task fitting only after commitment;
 missing duration ⇒ needs-info; completed/timer tasks unchanged; conflicting commitments reported; Mode A vs B.
+The distribution behaviour has its own suites: `__tests__/replan/placement.test.ts` (Stage A/B primitives —
+admissibility, candidate generation, spread, stability, determinism) and
+`__tests__/replan/scheduling-scenarios.test.ts` (A–H end-to-end: spread vs front-loading, midday commitment,
+tight availability, deadline-outranks-priority, approved-plan stability, insufficient time, determinism,
+break/buffer edges).
 
 Storage/migration (`__tests__/replan/planStorage.test.ts`, `__tests__/todos/migration.test.ts`): malformed
 `@replan/v1` and malformed todo fields don't crash; new fields round-trip; export shape unchanged
@@ -347,8 +362,15 @@ Each phase is independently testable and leaves the app green.
 
 - Buffer policy under-specified; recommended rule (buffer after tasks and after a break, none after a
   commitment) directly changes expected output — make it a preference.
-- Threshold-based break placement is deterministic but can strand a task before a commitment (the reference
-  `notes` case); explainable beats optimal.
+- The spread is deliberately capped: a light day is *not* smeared across the whole workday (`H = min(F, W +
+  SPREAD_FILL·F)`), so some tail stays free. `SPREAD_FILL` is the one tunable; raising it spreads more
+  aggressively, lowering it packs more tightly.
+- Stability vs freshness: an approved start is kept when it is within one gap of the balanced target, so
+  regenerating an unchanged plan is an identity operation. A pre-existing *front-loaded* plan is farther than
+  one gap from the balance and is therefore redistributed — intended, but visible to the user as movement.
+- Threshold-based break placement is deterministic; because blocks are now spread, a task is no longer
+  routinely stranded before a commitment, but a very tight window can still leave a task unplaced with a
+  reason code. Explainable beats optimal.
 - `priority` is new user-facing state; absent→**low** means existing/untagged tasks are the first candidates for
   Mode B's low-priority deferral. That is the chosen behaviour, but it is worth a calm UI hint so a task with no
   priority set is not silently treated as unimportant.

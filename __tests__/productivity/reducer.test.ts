@@ -146,6 +146,7 @@ describe('productivityReducer', () => {
     const next = apply(initialProductivityState, {
       type: 'hydrated',
       sessions: [],
+      active: {},
       ledger: { freezesEarned: 2, freezesSpent: 1 },
       memory: { lastEventAt: T0, previousDayScore: 72 },
     });
@@ -153,6 +154,20 @@ describe('productivityReducer', () => {
     expect(next.hydrated).toBe(true);
     expect(next.ledger.freezesEarned).toBe(2);
     expect(next.memory.previousDayScore).toBe(72);
+  });
+
+  it('restores an open session so a relaunch does not drop its focus', () => {
+    const open = startSession('s1', 'task-1', T0, T0 + 25 * MINUTE);
+
+    const next = apply(initialProductivityState, {
+      type: 'hydrated',
+      sessions: [],
+      active: { 'task-1': open },
+      ledger: { freezesEarned: 0, freezesSpent: 0 },
+      memory: { lastEventAt: null, previousDayScore: 0 },
+    });
+
+    expect(next.active['task-1']).toEqual(open);
   });
 
   it('records task-level activity without opening a session', () => {

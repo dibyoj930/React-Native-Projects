@@ -52,6 +52,7 @@ export function TodoRow({
   dueLabel,
   overdue,
   plannedLabel,
+  careerLabel,
 }: TodoRowProps) {
   const t = useTheme();
   // Theme-derived, so built per theme rather than at module scope.
@@ -119,6 +120,7 @@ export function TodoRow({
               the same line as the date and timer it explains. */}
           {((dueLabel && !todo.completed) ||
             (plannedLabel && !todo.completed) ||
+            careerLabel ||
             hasTimer ||
             isLocked) && (
             <View style={styles.metaLine}>
@@ -147,6 +149,19 @@ export function TodoRow({
                     color={t.colors.primary}
                   />
                   <Text style={styles.plannedText}>{plannedLabel}</Text>
+                </View>
+              )}
+
+              {careerLabel && (
+                <View style={[styles.metaItem, styles.careerItem]}>
+                  <MaterialCommunityIcons
+                    name="briefcase-outline"
+                    size={12}
+                    color={t.colors.primary}
+                  />
+                  <Text numberOfLines={1} style={styles.careerText}>
+                    {careerLabel}
+                  </Text>
                 </View>
               )}
 
@@ -392,6 +407,15 @@ const createStyles = (t: Theme) => {
       fontSize: 12,
       color: c.primary,
       fontWeight: '600',
+    },
+    /** A task's career link, kept on the same line as the other meta facts. */
+    careerItem: {
+      flexShrink: 1,
+    },
+    careerText: {
+      flexShrink: 1,
+      fontSize: 12,
+      color: c.primary,
     },
     timerText: {
       fontSize: 14,

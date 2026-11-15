@@ -218,4 +218,49 @@ describe('useReplan', () => {
     expect(api?.proposal).toBeNull();
     expect(await readDoc()).toBeNull();
   });
+
+  it('applying a plan keeps the suggestions state that was already stored', async () => {
+    // Apply writes preferences and the plan through the same document the
+    // suggestions controller writes dismissals to. It must merge, not rebuild:
+    // a rebuild would erase a dismissal recorded since the doc was read.
+    const suggestions = {
+      dayKey: TODAY,
+      dismissedIds: ['defer-report'],
+      lastEvaluatedAt: at(9, 0),
+    };
+    await AsyncStorage.setItem(
+      REPLAN_STORAGE_KEY,
+      JSON.stringify({
+        version: 1,
+        preferences: {
+          workdayStart: '09:00',
+          workdayEnd: '18:00',
+          bufferMinutes: 10,
+          breakMinutes: 15,
+          breakAfterMinutes: 60,
+          mode: 'fit',
+          lowPriorityDeferral: false,
+          notifyPlannedStarts: false,
+        },
+        plan: null,
+        suggestions,
+      }),
+    );
+
+    await render(tree([REPORT]));
+    await settle();
+
+    act(() => {
+      api?.generate();
+    });
+    await ReactTestRenderer.act(async () => {
+      await api?.apply();
+    });
+
+    const doc = await readDoc();
+    expect(doc?.plan?.placements).toEqual([
+      { taskId: 'report', start: at(14, 0), end: at(14, 45) },
+    ]);
+    expect(doc?.suggestions).toEqual(suggestions);
+  });
 });

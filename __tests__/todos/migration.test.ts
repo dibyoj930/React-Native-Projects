@@ -70,6 +70,7 @@ describe('migrateTodos — legacy tasks', () => {
         'completed',
         'completedAt',
         'createdAt',
+        'career',
         'dueDate',
         'dueTime',
         'estimatedMinutes',
@@ -239,6 +240,63 @@ describe('migrateTodos — dueTime round-trip', () => {
     const [task] = migrateTodos([{ id: 'abc', text: 'Keep me', dueTime }], NOW);
     expect(task.dueTime).toBeUndefined();
     expect(task.id).toBe('abc');
+  });
+});
+
+describe('migrateTodos — career link', () => {
+  it('keeps a well-formed goal, milestone and skill link', () => {
+    const [task] = migrateTodos(
+      [
+        {
+          id: 'abc',
+          text: 'Prepare portfolio',
+          career: {
+            goalId: ' goal-1 ',
+            milestoneId: ' milestone-1 ',
+            skillIds: [' skill-b ', 'skill-a', 'skill-a'],
+          },
+        },
+      ],
+      NOW,
+    );
+
+    expect(task.career).toEqual({
+      goalId: 'goal-1',
+      milestoneId: 'milestone-1',
+      skillIds: ['skill-a', 'skill-b'],
+    });
+  });
+
+  it('keeps a skills-only link, because work can exercise a skill without a goal', () => {
+    const [task] = migrateTodos(
+      [{ id: 'abc', text: 'Practice', career: { skillIds: ['skill-1'] } }],
+      NOW,
+    );
+
+    expect(task.career).toEqual({ skillIds: ['skill-1'] });
+  });
+
+  it('drops a milestone that has no goal to belong to', () => {
+    const [task] = migrateTodos(
+      [{ id: 'abc', text: 'X', career: { milestoneId: 'milestone-1', skillIds: ['s'] } }],
+      NOW,
+    );
+
+    expect(task.career).toEqual({ skillIds: ['s'] });
+  });
+
+  it('treats an empty or malformed link as no link at all', () => {
+    const [empty] = migrateTodos([{ id: 'a', text: 'X', career: {} }], NOW);
+    expect(empty.career).toBeUndefined();
+
+    const [string] = migrateTodos([{ id: 'b', text: 'X', career: 'goal-1' }], NOW);
+    expect(string.career).toBeUndefined();
+
+    const [blank] = migrateTodos(
+      [{ id: 'c', text: 'X', career: { goalId: '  ', skillIds: ['  ', 3, null] } }],
+      NOW,
+    );
+    expect(blank.career).toBeUndefined();
   });
 });
 

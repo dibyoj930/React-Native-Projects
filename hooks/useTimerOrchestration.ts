@@ -22,10 +22,26 @@ import {
 
 export type TimerOrchestrationDeps = {
   onTimerExpired: (ids: string[]) => void;
-  onStartFocus: (taskId: string) => void;
+  /**
+   * Opens the session log's session for a freshly started timer.
+   *
+   * `endsAt` is the timer's end time, passed so the session can bound its own
+   * credited focus to the timer it belongs to.
+   */
+  onStartFocus: (taskId: string, endsAt: number) => void;
   onPauseFocus: (taskId: string) => void;
   onResumeFocus: (taskId: string) => void;
   onStopFocus: (taskId: string, status: FocusSessionStatus) => void;
+  /**
+   * Whether the app's own stores have hydrated yet.
+   *
+   * The OS-held timers are re-adopted from an effect, and a re-adopted timer can
+   * expire immediately — which closes a session. Waiting for hydration means the
+   * persisted session that expiry must close is already in memory, instead of
+   * arriving a moment later as an orphan. Defaults to `true` for callers that do
+   * not hydrate anything.
+   */
+  restoreReady?: boolean;
 };
 
 export function useTimerOrchestration(deps: TimerOrchestrationDeps) {
@@ -33,7 +49,14 @@ export function useTimerOrchestration(deps: TimerOrchestrationDeps) {
   // than on the wrapper object. The caller is free to rebuild that object every
   // render; as long as the functions themselves are stable (useCallback on the
   // caller's side), these callbacks stay stable too.
-  const { onTimerExpired, onStartFocus, onPauseFocus, onResumeFocus, onStopFocus } = deps;
+  const {
+    onTimerExpired,
+    onStartFocus,
+    onPauseFocus,
+    onResumeFocus,
+    onStopFocus,
+    restoreReady = true,
+  } = deps;
 
   const [pickerTargetId, setPickerTargetId] = useState<string | null>(null);
   const [pickerVisible, setPickerVisible] = useState(false);
@@ -70,6 +93,9 @@ export function useTimerOrchestration(deps: TimerOrchestrationDeps) {
 
   const restoredRef = useRef(false);
   useEffect(() => {
+    // Wait until the app's own stores have loaded, so a restored timer that
+    // expires at once closes a session that is already in memory.
+    if (!restoreReady) return;
     // Once per mount: re-running would re-adopt the same pending triggers and,
     // on the expiry path, hand the same ids to the container a second time.
     if (restoredRef.current) return;
@@ -77,7 +103,7 @@ export function useTimerOrchestration(deps: TimerOrchestrationDeps) {
     restoreTimers().catch((error) => {
       console.warn('[timer] restore failed:', error);
     });
-  }, [restoreTimers]);
+  }, [restoreTimers, restoreReady]);
 
   const openTimerPicker = useCallback((id: string) => {
     setPickerTargetId(id);
@@ -89,7 +115,7 @@ export function useTimerOrchestration(deps: TimerOrchestrationDeps) {
       if (pickerTargetId) {
         const endPicker = startTimer(pickerTargetId, picked);
         if (endPicker !== null) {
-          onStartFocus(pickerTargetId);
+          onStartFocus(pickerTargetId, endPicker);
           syncTimerNotification({
             timerId: pickerTargetId,
             title: 'Timer done',

@@ -137,4 +137,66 @@ describe('usePlanOutcome', () => {
     const store = JSON.parse(raw as string) as Record<string, PlanOutcome>;
     expect(store[DAY].summary.completed).toBe(1);
   });
+
+  it('merges a legacy completion from this day’s stored record', async () => {
+    // A task finished before `completedAt` existed, then dropped from the plan
+    // by a rebuild: only the day's stored record still says it was done. The
+    // same path covers a relaunch, when the live plan no longer names it.
+    const stored: PlanOutcome = {
+      dayKey: DAY,
+      planApprovedAt: at(9),
+      generatedAt: at(11),
+      planSignature: 'old',
+      results: [
+        {
+          taskId: 'legacy',
+          taskText: 'Legacy report',
+          plannedStart: at(10),
+          plannedEnd: at(11),
+          wasScheduled: true,
+          completed: true,
+          status: 'completed-on-time',
+        },
+      ],
+      summary: {
+        totalPlanned: 1,
+        completed: 1,
+        completedOnTime: 1,
+        completedLate: 0,
+        postponed: 0,
+        missed: 0,
+      },
+    };
+    await AsyncStorage.setItem(PLAN_OUTCOMES_KEY, JSON.stringify({ [DAY]: stored }));
+
+    function LegacyProbe() {
+      api = usePlanOutcome({
+        hydrated: true,
+        dayKey: DAY,
+        plan: { ...PLAN, placements: [{ taskId: 'b', start: at(11), end: at(12) }] },
+        todos: [
+          todo({ id: 'legacy', text: 'Legacy report', completed: true }),
+          todo({ id: 'b' }),
+        ],
+        attribution: undefined,
+        now: at(13),
+      });
+      return null;
+    }
+
+    await render(<LegacyProbe />);
+    await ReactTestRenderer.act(async () => undefined);
+
+    expect(api?.historyLoaded).toBe(true);
+    const legacy = api?.outcome.results.find((r) => r.taskId === 'legacy');
+    expect(legacy?.completed).toBe(true);
+    expect(api?.outcome.summary.completed).toBe(1);
+  });
+
+  it('reports historyLoaded so a save cannot race the stored record', async () => {
+    await render(<Probe now={at(13)} />);
+    // No record for this day: loading has finished and found nothing, which is
+    // itself an answer the composition point must wait for before saving.
+    expect(api?.historyLoaded).toBe(true);
+  });
 });

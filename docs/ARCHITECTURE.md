@@ -2,8 +2,9 @@
 
 A local-first React Native productivity app: a task list with per-task focus
 timers, OS notifications, a focus-session log with streaks/momentum, adaptive
-daily replanning, and a light theme system. It has no backend and no accounts;
-every fact the app renders is either in memory or one of six AsyncStorage keys.
+daily replanning, a light theme system, and a career growth record. It has no
+backend and no accounts; every fact the app renders is either in memory or one
+of nine AsyncStorage keys.
 
 This document is the map: what the layers are, which one owns which fact, how
 data moves between them, and the invariants that hold the whole thing together.
@@ -60,7 +61,7 @@ tests and the module layout both assume them.
         └──────────────────────┘  └─────────────┘  └───────────────────┘
                             │           │          │
                     ┌───────▼───────────▼──────────▼───────────────┐
-   Adapters         │  AsyncStorage (6 keys)   Notifee (OS triggers) │
+   Adapters         │  AsyncStorage (9 keys)   Notifee (OS triggers) │
                     └───────────────────────────────────────────────┘
 ```
 
@@ -144,12 +145,55 @@ the barrel `replan/domain.ts` deliberately excludes `planStorage`.
 - `validate.ts` — re-checks a proposal's placements (no overlap, inside workday).
 - `explain.ts` — `formatClock` and the reason-code copy.
 - `planReminders.ts` — `planStartReminders`, the pure planned-start planner.
-- `planStorage.ts` — the **only** file that touches AsyncStorage (`@replan/v1`).
+- `planOutcome.ts` — `computePlanOutcome`, the single-day plan-vs-actual
+  classification. A task completed today stays in the comparison even when a
+  rebuild drops it from the plan; a completion with no `completedAt` (recorded
+  before that field existed) is kept alive by merging the day's persisted outcome.
+- `rollover.ts` — `deriveRollover`, `finalizeOutcome`, `aggregateOutcomes` (7-day
+  window maths; a missing day is unknown, not empty).
+- `planOutcomeStorage.ts` — sanitised outcome history (`@replan-outcomes/v1`).
+- `planStorage.ts` and `planOutcomeStorage.ts` — the storage edge; both are
+  excluded from `domain.ts`, so the pure barrel never pulls in AsyncStorage.
 
 The engine **never mutates tasks** and never rewrites `dueDate`/`dueTime`: it
 returns a *proposal*, and an approval writes one `DayPlan` in one `setItem`, so
 applying can never half-succeed across keys. Intervals are half-open
 `[start, end)`; the usable window never begins before `now`.
+
+### `career/` — the career development record
+
+A profession-neutral record of direction, skills, goals, milestones, evidence,
+achievements, assessments and periodic reviews. The career document never owns a
+task or a focus session. The only link is one-way: a task may carry an optional
+career reference, and a focus session copies that reference when it starts. The
+career side derives linked tasks and practice from those facts at read time.
+
+- `types.ts` — contracts, constants and labels. Goal types are generic
+  (`performance`, `skill`, `promotion`, `transition`, …), not job titles.
+- `defaults.ts` — suggested development areas. Every one can be renamed,
+  disabled or removed; none is a claim about the user's profession.
+- `factory.ts` — id/timestamp assignment and document seeding. Pure.
+- `migrations.ts` — versioned storage upgrades before sanitising. v1 → v2 maps
+  `profile.currentRole` → `designation`, `goal.category` → `goalType`, and the
+  single skill `importance` onto `roleImportance`/`futureImportance`.
+- `sanitize.ts` — field-by-field repair. It drops a record that cannot be
+  meaningful and never invents progress, a date, or a score.
+- `reducer.ts` — referential rules: archiving preserves history, hard deletes
+  unlink with a title snapshot, deleting a skill only unlinks references.
+- `selectors.ts`, `progress.ts` — derived views and ratios. A ratio exists only
+  where a real denominator exists (completed milestones / defined milestones).
+- `linkage.ts` — pure task/focus → career derivation. It resolves ids against the
+  current document, counts linked tasks and explicitly attributed focus, and
+  ignores dangling references. It never writes to the career document.
+- `storage.ts` — the only career file that touches AsyncStorage; one
+  `@career/v1` key and one serialized mutation queue.
+- `CareerProvider.tsx` — hydration, reducer dispatch and an 800 ms debounced
+  save. It stamps the clock so the reducer stays deterministic.
+
+`components/career/` holds a local route union and the screens. The module is
+mounted from the home screen. It does not read the task store directly: the
+cross-domain `hooks/useCareerDevelopment` holds the career document, task list and
+focus log, memoises the linkage model, and passes it into the module.
 
 ### `notifications/` — the OS boundary
 
@@ -173,7 +217,7 @@ library and is optional at runtime.
 | Fact | Owner | Persisted? |
 |---|---|---|
 | Task list | `hooks/useTasks` (`useState`) | `todos` key |
-| Focus sessions, streak ledger, momentum memory | `ProductivityProvider` (`useReducer`) | `productivity` key |
+| Focus sessions, open sessions, streak ledger, momentum memory | `ProductivityProvider` (`useReducer`) | `productivity` key |
 | Focus timers (running/paused) | `useFocusTimer` (refs + mirrored state) | OS trigger only |
 | Active/edit sheet visibility | `hooks/useTaskScreen` | no |
 | Current screen | `App.AppContent` (`Screen` union) | no |
@@ -185,6 +229,11 @@ library and is optional at runtime.
 | Goals draft (unsaved fields) | `GoalsScreen` local state | no |
 | Approved plan + replan preferences | `hooks/useReplan` in `WelcomeComponent` | `@replan/v1` key |
 | Replan proposal (unapproved) | `hooks/useReplan` (in-memory) | no |
+| Career document (profile, goals, skills, evidence, achievements, assessments, reviews) | `CareerProvider` (`useReducer`) | `@career/v1` key |
+| Career link on a task | `Todo.career` in `hooks/useTasks` | `todos` key |
+| Career attribution of a focus session | `FocusSession.career` snapshot owned by `ProductivityProvider` | `@productivity/v1` key |
+| Linked tasks + career practice | `hooks/useCareerDevelopment` (derived, never stored) | no |
+| Career route (overview, goals, skills, …) | `CareerModule` local state | no |
 | Theme override | `ThemeProvider` | `theme.preference` key |
 | Editing draft + modal form | `AddTodoModal` local state | n/a |
 
@@ -198,12 +247,13 @@ GestureHandlerRootView   swipe gestures must reach rows first
     ThemeProvider        StatusBar + all children observe one appearance
       NotificationProvider   owns permission + tap intent
         ProductivityProvider  mounted inside notifications; feeds WelcomeComponent
-          AppContent         owns the Screen union; useReminders + deep-link here
+          CareerProvider      independent of tasks and focus; mounted above the screen union
+            AppContent         owns the Screen union; useReminders + deep-link here
 ```
 
 `AppContent` is the app's entire navigation: a single `Screen` union
-(`home | tasks | tag | goals | replan | settings`) held above `WelcomeComponent`.
-No router is used because six destinations do not need a stack; the screens swap
+(`home | tasks | tag | goals | replan | settings | career`) held above `WelcomeComponent`.
+No router is used because seven destinations do not need a stack; the screens swap
 by rendering one or the other, and Android hardware back is handled explicitly.
 
 `WelcomeComponent` is the composition point: it reads `useTaskScreen()` once,
@@ -223,7 +273,13 @@ siblings by path so the graph stays visible.
   the rules that span them: timer expiry completes its task and closes the
   session `completed`; delete cancels the timer, closes the session `stopped`,
   then removes the task; completion checks the timer and lock guards before
-  writing; `rowPropsFor` builds each row's props.
+  writing; `rowPropsFor` builds each row's props. When focus starts, it passes the
+  task's career link into the session so later task edits cannot rewrite time
+  already spent.
+- **`useCareerDevelopment`** is the career-side container. It reads the career
+  document, task list and focus log, and memoises `buildCareerDevelopment`. The
+  resulting model supplies task-sheet options, row labels and the practice shown
+  on goal and skill detail. It performs no writes.
 - `useTasks` owns only the list and its CRUD/persistence.
 - `useTimerOrchestration` wraps `useFocusTimer` and supplies the other side of
   every timer event (start/pause/stop/expiry) plus notification scheduling.
@@ -244,7 +300,14 @@ siblings by path so the graph stays visible.
   fire-and-forget writes under the `@daily-goals/v1` key.
 - `useProductivityView` turns the productivity snapshot and the saved goals into
   the two home cards' models (`TodayViewModel`, `HistoryViewModel`), so
-  `TodayCard` and `ProductivityDashboard` stay presentational.
+  `TodayCard` and `ProductivityDashboard` stay presentational. It also builds the
+  next-task card's model (`buildNextTaskViewModel`) and reports whether the focus
+  log has `hydrated`, which gates any write built from the snapshot.
+- `todos/nextTask.ts` holds `selectNextTask`, the pure "what should I do next?"
+  decision: today's approved plan window first (the one happening now, else the
+  soonest to come), then the list's own `groupTodos` order (overdue → today →
+  upcoming → undated). The card that leads the home screen renders only what the
+  selector and `buildNextTaskViewModel` decide.
 - `useSettings` owns confirmations and cross-domain resets for the Settings
   screen.
 
@@ -272,12 +335,41 @@ row.onStartFocus → openTimerPicker → TimerPickerModal confirm
       → useFocusTimer.start (absolute end time) + scheduleTimerNotification
 expiry (1s tick OR AppState→active) → onExpire
   → useTaskScreen.handleTimerExpired → completeTodos(ids) + finishFocus('completed')
-restore on mount → getPendingTimers() → useFocusTimer.restore / treat past as expiry
+restore on mount (gated on both stores hydrating) → getPendingTimers()
+  → useFocusTimer.restore / treat past as expiry
 ```
+
+The open session is persisted under `@productivity/v1`, and each credit
+(`pauseSession`, `focusedSecondsAt`, `closeSession`) is clamped to the session's
+`expiresAt` — the timer's own end time. So an app killed mid-focus and reopened
+later banks the minutes the timer could have run, never the wall-clock gap.
+Restore waits for hydration so an already-passed pending timer closes the
+persisted session rather than firing before it has loaded.
 
 A timer is "running" iff it has an entry in `endsRef`; there is no separate
 running flag. The countdown display is derived from an absolute epoch, so
 backgrounding cannot desynchronise it.
+
+### Home screen layout
+
+The home screen leads with the question its user is usually asking — what to do
+next — then answers how the day is going, then offers the less-used destinations:
+
+```
+NextTaskCard   (selectNextTask + buildNextTaskViewModel; Start focus → existing picker)
+TodayCard      (compact progress: momentum + the two goals)
+plan overview  (open count + the `+` that opens the tasks list)
+Replan / Plan review rows   (suppressed while a focus timer runs)
+Tags index
+plan-vs-actual + reflection prompts
+history bars (ProductivityDashboard)
+export footer
+```
+
+`NextTaskCard` reuses the row's Start Focus flow (`useTaskScreen.startFocusFor`),
+so there is still exactly one timer. `selectNextTask` reuses the list's ordering
+rules; when nothing is scheduled it documents and uses the `groupTodos` fallback
+rather than inventing a new order.
 
 ### Reminders
 
@@ -342,10 +434,11 @@ These are the rules most likely to be broken by a well-meaning change:
 4. **`Notifee` repeating triggers are Android-only**, so every reminder is a
    one-shot timestamp reconciled on each relevant change.
 5. **Storage keys are independent** (`todos`, `productivity`, theme preference,
-   custom tags, daily goals, replan): clearing one never touches another.
+   custom tags, daily goals, replan, replan outcomes, reflections, career):
+   clearing one never touches another.
 6. **Components hold no colours**; `theme.test.ts` enforces it over the source.
-7. **No router, no new state library.** Six screens and one flat reducer do not
-   need either.
+7. **No router, no new state library.** Seven destinations and one flat reducer
+   do not need either.
 
 ## Known follow-ups
 
